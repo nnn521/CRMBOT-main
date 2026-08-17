@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+*.egg
+
+# Virtual env
+venv/
+.venv/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Env secrets
+.env
+
+# Output files
+backend/output/*.xlsx
+backend/output/*.docx
+backend/output/*.txt
+
+# Data / vector store
+backend/data/vector_store/
+
+# OS
+.DS_Store
+Thumbs.db
+docs/大创/
+docs/ROADMAP.md
+docs/CRMBot_答辩提纲.md

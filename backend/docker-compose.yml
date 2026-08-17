@@ -1,0 +1,73 @@
+# CRMBOT 服务编排
+# 包含：Backend API + PostgreSQL + Ollama
+
+services:
+  # ========== 后端 API 服务 ==========
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: crmbot-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"       # HTTP 与 WebSocket 共用同一 ASGI 服务
+    environment:
+      - DEBUG=false
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DATABASE_URL=postgresql://crmbot:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/crmbot
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:?INTERNAL_API_KEY is required}
+      - BOOTSTRAP_ADMIN_USERNAME=${BOOTSTRAP_ADMIN_USERNAME:-}
+      - BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.deepseek.com/v1}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-deepseek-chat}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-bge-m3}
+      - OLLAMA_BASE_URL=http://ollama:11434
+    volumes:
+      - ./data:/app/data           # 知识库 + 模板 + 图片
+      - ./output:/app/output       # 生成文档输出
+      - ./.env:/app/.env:ro        # 环境变量
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - crmbot-net
+
+  # ========== PostgreSQL 数据库 ========== 
+  postgres:
+    image: postgres:16-alpine
+    container_name: crmbot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: crmbot
+      POSTGRES_USER: crmbot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crmbot -d crmbot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crmbot-net
+
+  # ========== Ollama 本地模型服务 ==========
+  ollama:
+    image: ollama/ollama:latest
+    container_name: crmbot-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - crmbot-net
+
+volumes:
+  postgres-data:
+  ollama-data:
+
+networks:
+  crmbot-net:
+    driver: bridge

@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# workflow-state — inject a small per-turn state hint for long workflows.
+#
+# State file format (default: .skill-workflow-state):
+#   workflow=skills/<name>/workflows/plan-feature.md
+#   status=planning
+#   task=docs/plans/YYYY-MM-DD-slug
+#
+# The workflow file owns the prompt body through [workflow-state:<status>] blocks.
+# Missing state, workflow, or matching block exits silently so short tasks stay quiet.
+
+set -euo pipefail
+
+HARNESS="${CLAUDE_HARNESS:-${SESSION_HARNESS:-claude}}"
+STATE_FILE="${SKILL_WORKFLOW_STATE_FILE:-.skill-workflow-state}"
+
+[[ -f "$STATE_FILE" ]] || exit 0
+
+value_for() {
+  local key="$1"
+  awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$STATE_FILE"
+}
+
+STATUS="$(value_for status)"
+TASK_PATH="$(value_for task)"
+WORKFLOW_FILE="$(value_for workflow)"
+
+[[ -n "$STATUS" ]] || exit 0
+if [[ -z "$WORKFLOW_FILE" ]]; then
+  WORKFLOW_FILE="${SKILL_WORKFLOW_FILE:-}"
+fi
+allowed_workflow_path() {
+  local path="$1"
+  local current="" part
+  local -a parts
+  [[ -n "$path" ]] || return 1
+  case "$path" in
+    /*|..|../*|*/..|*/../*) return 1 ;;
+  esac
+  case "$path" in
+    workflows/*.md|skills/*/workflows/*.md|templates/skill/workflows/*.md) ;;
+    *) return 1 ;;
+  esac
+  IFS='/' read -r -a parts <<< "$path"
+  for part in "${parts[@]}"; do
+    current="${current:+$current/}$part"
+    [[ -L "$current" ]] && return 1
+  done
+  return 0
+}
+
+allowed_workflow_path "$WORKFLOW_FILE" || exit 0
+[[ -n "$WORKFLOW_FILE" && -f "$WORKFLOW_FILE" ]] || exit 0
+
+PAYLOAD="$(python3 - "$WORKFLOW_FILE" "$STATUS" "$TASK_PATH" <<'PY'
+from pathlib import Path
+import json
+import re
+import sys
+
+path = Path(sys.argv[1])
+status = sys.argv[2]
+task = sys.argv[3]
+try:
+    text = path.read_text(encoding="utf-8")
+except OSError:
+    raise SystemExit(0)
+
+pattern = re.compile(
+    rf"\[workflow-state:{re.escape(status)}\]\s*\n(.*?)\n\s*\[/workflow-state:{re.escape(status)}\]",
+    re.S,
+)
+match = pattern.search(text)
+if not match:
+    raise SystemExit(0)
+
+header = f"Status: {status}"
+if task:
+    header = f"Task: {task}\n{header}"
+body = match.group(1).strip()
+print(json.dumps(f"<workflow-state>\n{header}\n{body}\n</workflow-state>"))
+PY
+)"
+
+[[ -n "$PAYLOAD" ]] || exit 0
+
+case "$HARNESS" in
+  cursor)
+    printf '{"additional_context":%s}\n' "$PAYLOAD"
+    ;;
+  gemini)
+    printf '{"hookSpecificOutput":{"hookEventName":"BeforeAgent","additionalContext":%s}}\n' "$PAYLOAD"
+    ;;
+  claude|claude-code)
+    printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":%s}}\n' "$PAYLOAD"
+    ;;
+  *)
+    printf '{"additionalContext":%s}\n' "$PAYLOAD"
+    ;;
+esac

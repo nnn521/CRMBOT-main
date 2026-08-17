@@ -1,0 +1,39 @@
+{
+  "_comment": "Claude Code hooks settings fragment. Copy to .claude/settings.json, or merge the top-level hooks object into an existing settings file. See templates/hooks/README.md for rollout and effectiveness notes. Schema: each hook matcher has a nested 'hooks' array of {type,command} objects — verified against Claude Code CLI v2.1+.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/session-start"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "_comment": "Optional workflow-state hint for long workflows. The script exits silently unless .skill-workflow-state exists.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/workflow-state"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "_comment": "Optional gate on rules/agent-behavior.md edits. Remove this matcher block to disable.",
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/agent-behavior-gate.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

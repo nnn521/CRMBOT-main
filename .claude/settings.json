@@ -1,0 +1,18 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://token-plan-cn.xiaomimimo.com/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "tp-cyfp7e5e2ws6l5bdfp6ogt6ki8183o4r1ljmjkm9uxxrreov",
+    "ANTHROPIC_MODEL": "mimo-v2.5-pro",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "mimo-v2.5-pro",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "mimo-v2.5-pro",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "mimo-v2.5-pro"
+  },
+  "skills": [
+    "skill-based-architecture",
+    "project-architect",
+    "frontend-toolkit",
+    "oop-architect",
+    "web-designer",
+    "awesome-skills"
+  ]
+}

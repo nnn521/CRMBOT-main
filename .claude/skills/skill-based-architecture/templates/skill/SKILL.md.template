@@ -1,0 +1,100 @@
+---
+name: {{NAME}}
+description: >
+  <!-- FILL: Domain-level activation only — ≥ 2 quoted phrases in the user's real language(s) + concrete activation conditions. Do NOT list every workflow; Common Tasks routes after activation. Copy byte-for-byte into .cursor/skills/{{NAME}}/SKILL.md. -->
+  This skill should be used when the user asks to "<trigger phrase 1>",
+  "<trigger phrase 2>", or "<trigger phrase 3 / 中文触发短语>".
+  Activate when <condition 1> or <condition 2>.
+primary: true
+---
+
+# {{NAME}}
+
+{{SUMMARY}}
+
+<!-- <always-applicable> / <task-routing> tags below are load-bearing:
+     XML blocks survive context compression better than plain headings.
+     Details: references/thin-shells.md § XML-Tag Injection. -->
+
+<always-applicable>
+
+## Always Read
+
+These files apply to every task. Read them first:
+<!-- ALWAYS_READ_START -->
+1. `rules/project-rules.md`
+2. `rules/coding-standards.md`
+3. `rules/agent-behavior.md`
+<!-- ALWAYS_READ_END -->
+
+<!-- FILL: edit routing.yaml always_read, then run scripts/sync-routing.sh. Keep to 2–3 files max. Domain-specific rules do NOT go here. agent-behavior.md is pre-filled universal defaults — remove it only if your project explicitly overrides those defaults. -->
+
+## Session Discipline
+
+**Every new task — even the second or third in the same session — must re-read this SKILL.md, re-match the route below, and re-read all files listed for that route.**
+
+- "I already read it earlier" is not valid. Context compresses silently; the new task may match a different route; partial memory is worse than no memory.
+- Re-read costs seconds. Skipping costs hours of wrong-direction work.
+- This applies to ALL task types, not just bug fixes.
+- Before final validation/commit after a long or interrupted task, run `protocol-blocks/reboot-check.md`: restate the original user constraints and chosen route; if you cannot, re-read the request, SKILL.md, and workflow before proceeding.
+
+**Route-before-routing check (Principle 1 gate)** — if the request contains vague improvement verbs ("refactor / clean up / optimize / make it better / 整理 / 重构 / 优化") **without** a concrete module, file, or verifiable outcome, **stop and ask** for scope before matching below. Offering partial plans, scanning the project "to get started", or proposing options is forbidden — the gate blocks forward movement until scope is clarified. See `protocol-blocks/ambiguous-request-gate.md` for full protocol.
+
+</always-applicable>
+
+<task-routing>
+
+## Common Tasks
+
+Each entry lists the exact files to read — don't read files not listed for your task:
+
+<!-- FILL: edit routing.yaml, then run scripts/sync-routing.sh. Keep 3–8 real recurring task types and an Other fallback. -->
+<!-- ROUTING_SUMMARY_START -->
+- Fix bug / 修复 bug / 排查异常 (`fix-bug`) -> reads `rules/project-rules.md`, `rules/coding-standards.md`; workflow `workflows/fix-bug.md`; read task-relevant `rules/*.md` + follow `workflows/fix-bug.md`; ref `references/gotchas.md`; triggers: "这个接口报错了", "测试挂了", "fix this failing test"
+- Add / refactor / optimize non-bug behavior / 新增 / 重构 / 优化非 bug 行为 (`change-managed`) -> reads `rules/*.md`; workflow `workflows/change-managed.md`; read task-relevant `rules/*.md` + follow `workflows/change-managed.md`; triggers: "优化这个模块", "帮我加一个功能", "refactor this flow"
+- Plan a complex feature or long-running change / 规划复杂功能 / 长任务 (`plan-feature`) -> reads `rules/project-rules.md`, `rules/coding-standards.md`; workflow `workflows/plan-feature.md`; follow `workflows/plan-feature.md`; create a task dossier only for complex, long-running, or external-research work; triggers: "先帮我把这个需求问清楚", "这个功能比较大,先规划一下", "plan this feature before coding"
+- Profile / refresh project understanding / 梳理 / 刷新项目理解 (`profile-project`) -> reads `rules/project-rules.md`; workflow `workflows/profile-project.md`; follow `workflows/profile-project.md`; write only evidence-labeled conclusions; triggers: "帮我理解这个项目", "重新梳理项目规则", "refresh the project profile"
+- Update from skill-based-architecture upstream / 从上游 skill-based-architecture 更新 (`update-upstream`) -> reads `rules/project-rules.md`; workflow `workflows/update-upstream.md`; follow `workflows/update-upstream.md`; agent compares, patches, and validates without asking user to diff; triggers: "上游项目更新了,帮我更新一下", "更新 skill-based-architecture 模板", "refresh from upstream"
+- Update skill rules or record lessons / 更新 skill 规则 / 记录经验 (`update-rules`) -> reads `rules/project-rules.md`, `references/gotchas.md`, `references/behavior-failures.md`; workflow `workflows/update-rules.md`; follow `workflows/update-rules.md`; record only generalized, activated lessons; behavior failures go to `references/behavior-failures.md`; triggers: "记录这个规则", "把这次踩坑记下来", "update the project skill rules"
+- Multi-subtask / long run / 多子任务 / 长任务 (`subagent-driven`) -> reads `rules/project-rules.md`; workflow `workflows/subagent-driven.md`; follow `workflows/subagent-driven.md`; triggers: "这个任务比较大,分几路做", "多个独立子任务并行", "run multiple subtasks"
+- Other / unlisted task / 其他 / 未列出的任务 (`other`) -> reads `rules/project-rules.md`; workflow Check `workflows/` for closest match; read `rules/project-rules.md` + `rules/coding-standards.md`, then match by workflow filename; if no match, proceed with Always Read rules; triggers: "其他没有明确路由的任务"
+<!-- ROUTING_SUMMARY_END -->
+
+</task-routing>
+
+## Known Gotchas
+
+<!-- FILL: brief, scannable list of the most costly pitfalls. Full details in `references/gotchas.md`. Start empty; grows via AAR. -->
+- <!-- e.g. Controller X needs Y registered before Z — see `references/gotchas.md#x-registration` -->
+
+## Core Principles
+
+<!-- FILL: 3–7 project-specific principles. Each MUST end with a ✓ Check: sentence —
+     a concrete post-execution question. Declarative-only principles get "remembered"
+     before acting but have no hook to trigger verification. Examples below are
+     realistic shapes, not your actual rules — replace every one and delete these lines. -->
+
+1. **Every change ships with a test** — bug fixes and features both require an automated test that fails before the change and passes after.
+   ✓ Check: can you name the new test file or test name added in this commit? If not, the change isn't done.
+
+2. **No cross-layer imports** — UI code never reaches into data-access code directly; all access goes through the service layer.
+   ✓ Check: `grep -rn "from '.*\/db" src/components/` returns 0 results.
+
+3. **User-facing error messages are typed, not strings** — every user-visible error comes from an enum or typed error class so translations and telemetry can match on it.
+   ✓ Check: does every `throw` / `return error` in this change reference a named error type, not a raw string?
+
+<!-- Delete the examples above and write your own. Patterns that work well: cross-cutting invariants, architectural rules,
+     style constraints agents keep violating, project-specific security/perf guards. -->
+
+## Rule Priority
+1. `skills/{{NAME}}/SKILL.md`
+2. `skills/{{NAME}}/rules/`
+3. `skills/{{NAME}}/workflows/`
+4. `skills/{{NAME}}/references/`
+5. Root `README.md`
+6. Thin shells (`AGENTS.md`, `CLAUDE.md`, `CODEX.md`, `GEMINI.md`, `.cursor/rules/*.mdc`) — compatibility only
+
+## Project Boundaries
+<!-- FILL: 2–5 bullets describing what this project owns and does NOT own. -->
+- <!-- Boundary 1 -->
+- <!-- Boundary 2 -->

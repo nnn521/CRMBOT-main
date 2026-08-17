@@ -1,0 +1,58 @@
+name: skill-based-architecture
+author: shiqi
+compatibility:
+  - cursor
+  - claude
+  - codex
+  - gemini
+  - opencode
+description: >
+  This skill should be used when the user asks to "organize the project rules",
+  "clean up scattered documentation", "把规则迁移到 skills 目录", "优化 skill 路由",
+  "提高 description 命中率", or "减少薄壳重复维护".
+  Activate when a SKILL.md is too large, rules are duplicated across agent entry
+  files, task routing or trigger_examples miss natural user language, or
+  templates / thin shells / validation scripts need drift-resistant maintenance.
+
+entry: SKILL.md
+
+tags:
+  - architecture
+  - documentation
+  - rules
+  - meta-skill
+
+triggers:
+  - SKILL.md exceeds ~150 lines
+  - Project rules scattered across AGENTS.md, .cursor/rules/, CLAUDE.md, etc.
+  - User requests skill-based architecture or rule consolidation
+  - User asks to improve skill routing, description hit rate, or trigger examples
+  - 用户要求整理项目规则、清理散乱文档、重构规则或迁移规则到 skills 目录
+  - 用户要求优化 skill 路由、提高 description 命中率、减少薄壳重复维护
+
+files:
+  - SKILL.md       # Skill entry: when to use, target structure, core principles
+  - WORKFLOW.md    # Migration procedure: quick start, phases, and downstream upgrades
+  - UPSTREAM-CHANGES.md  # Upstream-owned notes for downstream refresh agents
+  - REFERENCE.md   # Stub + index, redirects to references/
+  - references/    # Layout, thin-shells, protocols, conventions split by topic
+  - scripts/check-all.sh  # One-command upstream maintenance check suite
+  - scripts/check-self-scenarios.sh  # Minimal self-hosting route scenario checks
+  - scripts/check-upstream-changes.sh  # Guard requiring upstream notes for downstream-facing updates
+  - scripts/skill-asset  # AAR-time reconcile CLI: where / related / group (zero-deps Node.js)
+  - TEMPLATES-GUIDE.md   # Minimal starter + full templates for update-rules, fix-bug, maintain-docs
+  - EXAMPLES.md    # Stub + index, redirects to examples/
+  - examples/      # Numbered examples and behavior-failure scenarios split by topic
+  - README.md      # Bilingual overview for humans (EN + ZH)
+  - references/self-hosting-routing.yaml  # Self-hosting routing source
+
+compatible_tools:
+  - cursor
+  - claude
+  - codex
+  - gemini
+  - opencode
+
+install:
+  user_level: ~/.cursor/skills/skill-based-architecture/
+  project_level: .cursor/skills/skill-based-architecture/

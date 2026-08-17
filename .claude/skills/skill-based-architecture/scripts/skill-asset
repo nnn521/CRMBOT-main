@@ -1,0 +1,634 @@
+#!/usr/bin/env node
+/**
+ * skill-asset — skill-based-architecture reconcile CLI
+ *
+ * Three commands:
+ *   where    <keyword>...   suggest where a new lesson should be placed
+ *   related  <keyword>...   find sections related to keywords
+ *   group                   detect topic-similar sections across files
+ *
+ * Global options:
+ *   --top N        limit output count (defaults: where=5, related=10, group=20)
+ *   --json         JSON output for piping / hook integration
+ *
+ * Design: single Node.js file, zero dependencies, stdlib only.
+ * Parsing skips: leading YAML frontmatter (--- ... ---) and UTF-8 BOM.
+ *
+ * Search scope (priority order):
+ *   1. ./skills/  ./rules/  ./references/  ./workflows/  (if present)
+ *   2. Top-level *.md  (fallback)
+ */
+
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+
+// ============================================================
+// Configuration
+// ============================================================
+
+const DEFAULT_TOP = { where: 5, related: 10, group: 20 };
+const SEARCH_DEPTH = 6;
+const SKIP_DIRS = new Set([
+  'node_modules', 'dist', 'build', 'out', 'target', 'vendor',
+  '.git', '.idea', '.vscode', '.cache',
+]);
+
+let cliOptions = { top: null, json: false };
+
+// ============================================================
+// Argument parsing
+// ============================================================
+
+function parseGlobalOptions(args) {
+  const options = { top: null, json: false };
+  const remaining = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--json') {
+      options.json = true;
+    } else if (a === '--top' || a === '-n') {
+      const next = args[++i];
+      if (next === undefined) {
+        console.error('Error: --top requires a numeric argument');
+        process.exit(2);
+      }
+      const n = parseInt(next, 10);
+      if (isNaN(n) || n < 1) {
+        console.error(`Error: --top requires a positive integer, got: ${next}`);
+        process.exit(2);
+      }
+      options.top = n;
+    } else {
+      remaining.push(a);
+    }
+  }
+  return { options, remaining };
+}
+
+// ============================================================
+// File discovery
+// ============================================================
+
+function walkDir(dir, callback, depth = 0) {
+  if (depth > SEARCH_DEPTH) return;
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (e) {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue;
+    if (SKIP_DIRS.has(entry.name)) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkDir(full, callback, depth + 1);
+    } else if (entry.isFile() && entry.name.endsWith('.md')) {
+      callback(full);
+    }
+  }
+}
+
+function findRuleFiles(root) {
+  const files = [];
+  const candidates = ['skills', 'rules', 'references', 'workflows'];
+  let foundStructured = false;
+
+  for (const c of candidates) {
+    const full = path.join(root, c);
+    if (fs.existsSync(full)) {
+      try {
+        if (fs.statSync(full).isDirectory()) {
+          walkDir(full, p => files.push(p));
+          foundStructured = true;
+        }
+      } catch (e) { /* ignore */ }
+    }
+  }
+
+  if (!foundStructured) {
+    try {
+      for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+        if (entry.name.startsWith('.')) continue;
+        if (entry.name.endsWith('.md') && entry.isFile()) {
+          files.push(path.join(root, entry.name));
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }
+  return files;
+}
+
+// ============================================================
+// Markdown section parsing (with frontmatter + BOM handling)
+// ============================================================
+
+function parseSections(filePath) {
+  let content;
+  try {
+    content = fs.readFileSync(filePath, 'utf-8');
+  } catch (e) {
+    return [];
+  }
+  if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1);
+
+  const lines = content.split('\n');
+
+  let startIdx = 0;
+  if (lines.length > 0 && lines[0].trim() === '---') {
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i].trim() === '---') {
+        startIdx = i + 1;
+        break;
+      }
+    }
+  }
+
+  const sections = [];
+  let current = null;
+  let inCodeBlock = false;
+
+  for (let i = startIdx; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (line.startsWith('```')) {
+      inCodeBlock = !inCodeBlock;
+      if (current) current._buf.push(line);
+      continue;
+    }
+    if (inCodeBlock) {
+      if (current) current._buf.push(line);
+      continue;
+    }
+
+    const m = line.match(/^(#{1,6})\s+(.+?)\s*$/);
+    if (m) {
+      if (current) {
+        current.content = current._buf.join('\n').trim();
+        delete current._buf;
+        sections.push(current);
+      }
+      current = {
+        file: filePath,
+        level: m[1].length,
+        heading: m[2].trim(),
+        lineNumber: i + 1,
+        _buf: [],
+      };
+    } else if (current) {
+      current._buf.push(line);
+    }
+  }
+  if (current) {
+    current.content = current._buf.join('\n').trim();
+    delete current._buf;
+    sections.push(current);
+  }
+  return sections;
+}
+
+// ============================================================
+// Text utilities
+// ============================================================
+
+// Use Intl.Segmenter for CJK word segmentation (Node 16+). For Latin runs
+// we keep whitespace-only split so hyphenated identifiers like "z-index"
+// and "renderAmis" survive intact. Falls back to whitespace-only on Node <16.
+const HAS_SEGMENTER = typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function';
+const cjkSegmenter = HAS_SEGMENTER ? new Intl.Segmenter('zh', { granularity: 'word' }) : null;
+const CJK_CHAR = /[一-鿿㐀-䶿]/;
+
+function tokenize(text) {
+  const cleaned = text
+    .toLowerCase()
+    .replace(/[`*_~\[\]()<>{}|"'.,!?;:/\\]/g, ' ')
+    .replace(/[，。！?；：、""''「」『』《》【】\(\)]/g, ' ');
+
+  if (!cjkSegmenter) {
+    return cleaned.split(/\s+/).filter(t => t.length > 0);
+  }
+
+  const tokens = [];
+  let buf = '';
+  let bufKind = null;
+
+  const flush = () => {
+    if (!buf) return;
+    if (bufKind === 'cjk') {
+      for (const seg of cjkSegmenter.segment(buf)) {
+        const t = seg.segment;
+        if (t.length > 0 && /\S/.test(t)) tokens.push(t);
+      }
+    } else {
+      for (const t of buf.split(/\s+/)) {
+        if (t.length > 0) tokens.push(t);
+      }
+    }
+    buf = '';
+    bufKind = null;
+  };
+
+  for (const ch of cleaned) {
+    const kind = CJK_CHAR.test(ch) ? 'cjk' : 'latin';
+    if (bufKind && bufKind !== kind) flush();
+    bufKind = kind;
+    buf += ch;
+  }
+  flush();
+
+  return tokens;
+}
+
+function significantTokens(text) {
+  return tokenize(text).filter(t => t.length >= 2);
+}
+
+function jaccardSimilarity(a, b) {
+  if (a.size === 0 || b.size === 0) return 0;
+  let intersect = 0;
+  for (const x of a) if (b.has(x)) intersect++;
+  return intersect / (a.size + b.size - intersect);
+}
+
+// ============================================================
+// Scoring
+// ============================================================
+
+function scoreSection(section, keywords) {
+  const headingLower = section.heading.toLowerCase();
+  const contentLower = (section.content || '').toLowerCase();
+
+  let score = 0;
+  const matched = [];
+
+  for (const kw of keywords) {
+    const kwLower = kw.toLowerCase();
+    let hit = false;
+    if (headingLower.includes(kwLower)) {
+      score += 3;
+      hit = true;
+    } else if (contentLower.includes(kwLower)) {
+      score += 1;
+      hit = true;
+    }
+    if (hit) matched.push(kw);
+  }
+  return { score, matched };
+}
+
+function extractSnippet(section, keywords, maxLen = 100) {
+  const content = section.content || '';
+  if (!content) return '';
+  const lines = content.split('\n').filter(l => l.trim().length > 0);
+
+  for (const kw of keywords) {
+    const kwLower = kw.toLowerCase();
+    for (const line of lines) {
+      if (line.toLowerCase().includes(kwLower)) {
+        const cleaned = line.replace(/^\s*[-*+]\s+/, '').replace(/^\s*\d+\.\s+/, '').trim();
+        return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + '...' : cleaned;
+      }
+    }
+  }
+  if (lines.length > 0) {
+    const first = lines[0].replace(/^\s*[-*+]\s+/, '').trim();
+    return first.length > maxLen ? first.slice(0, maxLen) + '...' : first;
+  }
+  return '';
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+
+function gatherSections(root) {
+  const files = findRuleFiles(root);
+  const allSections = [];
+  for (const f of files) {
+    for (const s of parseSections(f)) {
+      if (s.level >= 2 && s.level <= 4) {
+        allSections.push(s);
+      }
+    }
+  }
+  return { files, sections: allSections };
+}
+
+function relativePath(p, root) {
+  return path.relative(root, p) || path.basename(p);
+}
+
+function emitJson(obj) {
+  process.stdout.write(JSON.stringify(obj, null, 2) + '\n');
+}
+
+function buildResults(scored, keywords, root) {
+  return scored.map(r => ({
+    file: relativePath(r.section.file, root),
+    heading: r.section.heading,
+    line: r.section.lineNumber,
+    snippet: extractSnippet(r.section, keywords),
+    matched: r.matched,
+    score: r.score,
+  }));
+}
+
+// ============================================================
+// Human renderers
+// ============================================================
+
+function renderRankedHuman(opts) {
+  const { command, keywords, files, sections, scored, top, root, footerNewLocation } = opts;
+  console.log(`Query: ${keywords.join(' · ')}`);
+  console.log(`Scanned ${files.length} files, ${sections.length} sections\n`);
+
+  if (scored.length === 0) {
+    console.log(`No sections found containing those keywords.`);
+    if (footerNewLocation) {
+      console.log(`Suggestion: create as a new section or new file.\n`);
+      const dirs = new Set();
+      for (const f of files) dirs.add(path.dirname(f));
+      console.log(`  Consider creating in:`);
+      for (const d of [...dirs].slice(0, 5)) {
+        console.log(`    ${relativePath(d, root)}/`);
+      }
+    }
+    return;
+  }
+
+  const topResults = scored.slice(0, top);
+  const headerLabel = command === 'where'
+    ? `Suggested placement (by relevance, top ${top}):\n`
+    : `Found ${scored.length} related sections${scored.length > top ? ` (showing top ${top})` : ''}:\n`;
+  console.log(headerLabel);
+
+  const NUMS = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩'];
+  topResults.forEach((r, i) => {
+    const rel = relativePath(r.section.file, root);
+    const num = command === 'where' ? (NUMS[i] || `${i + 1}.`) : `[${i + 1}]`;
+    console.log(`  ${num} ${rel}  ## ${r.section.heading}  (L${r.section.lineNumber})`);
+    const snippet = extractSnippet(r.section, keywords);
+    if (snippet) console.log(command === 'where' ? `     existing: "${snippet}"` : `      ${snippet}`);
+    console.log(command === 'where'
+      ? `     matched: ${r.matched.join(', ')} | score: ${r.score}`
+      : `      matched: ${r.matched.join(', ')} | score: ${r.score}`);
+    if (command === 'where') {
+      console.log(`     -> ${i === 0 ? 'merge into this section (highest relevance)' : 'alternative'}`);
+    }
+    console.log();
+  });
+
+  if (scored.length > top) {
+    console.log(`(${scored.length - top} more results hidden, use --top ${scored.length} to see all)`);
+  }
+
+  if (command === 'where') {
+    console.log(`\nIf none of the above fit:`);
+    const dirs = new Set();
+    for (const f of files) dirs.add(path.dirname(f));
+    console.log(`  Consider creating in:`);
+    for (const d of [...dirs].slice(0, 5)) {
+      console.log(`    ${relativePath(d, root)}/`);
+    }
+  }
+}
+
+function renderGroupsHuman(opts) {
+  const { files, headings, groups, top, root } = opts;
+  console.log(`Scanned ${files.length} files, ${headings.length} ## sections\n`);
+
+  if (headings.length < 2) {
+    console.log('Too few sections to analyze grouping.');
+    return;
+  }
+  if (groups.length === 0) {
+    console.log('No obvious grouping opportunities detected.');
+    return;
+  }
+
+  const topGroups = groups.slice(0, top);
+  console.log(`Found ${groups.length} potential grouping opportunit${groups.length === 1 ? 'y' : 'ies'}${groups.length > top ? ` (showing top ${top})` : ''}:\n`);
+  for (const g of topGroups) {
+    let common = new Set(g[0].tokens);
+    for (let k = 1; k < g.length; k++) {
+      common = new Set([...common].filter(t => g[k].tokens.has(t)));
+    }
+    const topic = [...common].slice(0, 3).join(', ') || '(mixed)';
+    console.log(`  topic: "${topic}"`);
+    for (const item of g) {
+      console.log(`    - ${relativePath(item.file, root)}  ## ${item.heading}  (L${item.lineNumber})`);
+    }
+    console.log(`  -> may belong together\n`);
+  }
+
+  if (groups.length > top) {
+    console.log(`(${groups.length - top} more groups hidden, use --top ${groups.length} to see all)\n`);
+  }
+
+  // Heuristic-based output — flag false-positive risk explicitly
+  console.log(`Note: results are heading-similarity heuristics, not confirmed duplicates.`);
+  console.log(`Some clusters may be intentional (e.g., each file having its own "Anti-patterns"`);
+  console.log(`section is fine). Treat results as candidates for review, not commands to merge.`);
+}
+
+// ============================================================
+// Commands
+// ============================================================
+
+function cmdWhere(keywords) {
+  if (keywords.length === 0) {
+    console.error('Error: please provide at least one keyword');
+    console.error('Usage: skill-asset where <keyword> [keyword2] ...');
+    process.exit(2);
+  }
+  const root = process.cwd();
+  const { files, sections } = gatherSections(root);
+  const top = cliOptions.top || DEFAULT_TOP.where;
+  const scored = sections
+    .map(s => ({ section: s, ...scoreSection(s, keywords) }))
+    .filter(r => r.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (cliOptions.json) {
+    emitJson({
+      command: 'where',
+      keywords,
+      filesScanned: files.length,
+      sectionsScanned: sections.length,
+      totalMatches: scored.length,
+      results: buildResults(scored.slice(0, top), keywords, root),
+    });
+    return;
+  }
+
+  if (files.length === 0) {
+    console.error('Warning: no rule files found (skills/ rules/ references/ workflows/ or top-level *.md)');
+    process.exit(0);
+  }
+  renderRankedHuman({ command: 'where', keywords, files, sections, scored, top, root, footerNewLocation: true });
+}
+
+function cmdRelated(keywords) {
+  if (keywords.length === 0) {
+    console.error('Error: please provide at least one keyword');
+    console.error('Usage: skill-asset related <keyword> [keyword2] ...');
+    process.exit(2);
+  }
+  const root = process.cwd();
+  const { files, sections } = gatherSections(root);
+  const top = cliOptions.top || DEFAULT_TOP.related;
+  const scored = sections
+    .map(s => ({ section: s, ...scoreSection(s, keywords) }))
+    .filter(r => r.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (cliOptions.json) {
+    emitJson({
+      command: 'related',
+      keywords,
+      filesScanned: files.length,
+      totalMatches: scored.length,
+      results: buildResults(scored.slice(0, top), keywords, root),
+    });
+    return;
+  }
+  renderRankedHuman({ command: 'related', keywords, files, sections, scored, top, root });
+}
+
+function cmdGroup() {
+  const root = process.cwd();
+  const { files, sections } = gatherSections(root);
+  const top = cliOptions.top || DEFAULT_TOP.group;
+
+  const headings = sections
+    .filter(s => s.level === 2)
+    .map(s => ({
+      file: s.file,
+      heading: s.heading,
+      lineNumber: s.lineNumber,
+      tokens: new Set(significantTokens(s.heading)),
+    }))
+    .filter(h => h.tokens.size > 0);
+
+  const visited = new Set();
+  const groups = [];
+  for (let i = 0; i < headings.length; i++) {
+    if (visited.has(i)) continue;
+    const group = [headings[i]];
+    visited.add(i);
+    for (let j = i + 1; j < headings.length; j++) {
+      if (visited.has(j)) continue;
+      if (headings[i].file === headings[j].file) continue;
+      const a = headings[i].tokens;
+      const b = headings[j].tokens;
+      const intersect = new Set([...a].filter(t => b.has(t)));
+      if (intersect.size < 1) continue;
+      const jaccard = jaccardSimilarity(a, b);
+      if (intersect.size >= 2 || jaccard >= 0.5) {
+        group.push(headings[j]);
+        visited.add(j);
+      }
+    }
+    if (group.length >= 2) groups.push(group);
+  }
+
+  if (cliOptions.json) {
+    emitJson({
+      command: 'group',
+      filesScanned: files.length,
+      sectionsScanned: headings.length,
+      totalGroups: groups.length,
+      heuristic: 'heading-similarity',
+      note: 'Results may include intentional clusters (e.g., each file having its own anti-patterns section). Treat as candidates for review, not commands to merge.',
+      groups: groups.slice(0, top).map(g => {
+        let common = new Set(g[0].tokens);
+        for (let k = 1; k < g.length; k++) {
+          common = new Set([...common].filter(t => g[k].tokens.has(t)));
+        }
+        return {
+          topic: [...common].slice(0, 3),
+          members: g.map(item => ({
+            file: relativePath(item.file, root),
+            heading: item.heading,
+            line: item.lineNumber,
+          })),
+        };
+      }),
+    });
+    return;
+  }
+  renderGroupsHuman({ files, headings, groups, top, root });
+}
+
+// ============================================================
+// Entry point
+// ============================================================
+
+function printUsage() {
+  process.stdout.write(`skill-asset — skill-based-architecture reconcile CLI
+
+Usage:
+  skill-asset where    <keyword>...    suggest where a new lesson should be placed
+  skill-asset related  <keyword>...    find sections related to keywords
+  skill-asset group                    detect topic-similar sections across files
+
+Global options:
+  --top N        limit output count (defaults: where=5, related=10, group=20)
+  --json         JSON output for piping / hook integration
+  --help, -h     print this help and exit
+
+Examples:
+  skill-asset where renderAmis 第二参数 createObject
+  skill-asset related "z-index" --top 3
+  skill-asset group --json
+
+Search scope (priority order):
+  1. ./skills/  ./rules/  ./references/  ./workflows/  (if present)
+  2. Top-level *.md  (fallback)
+
+Parsing skips:
+  - Leading YAML frontmatter (--- ... ---)
+  - UTF-8 BOM (U+FEFF)
+
+Note: 'group' uses heading-similarity heuristics. Some matches may be
+intentional (e.g., each file having its own anti-patterns section).
+Treat results as candidates for review, not commands to merge.
+
+Exit codes:
+  0  Normal
+  2  Argument error
+`);
+}
+
+function main() {
+  const args = process.argv.slice(2);
+  if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
+    printUsage();
+    process.exit(0);
+  }
+
+  const cmd = args[0];
+  const restArgs = args.slice(1);
+  const { options, remaining } = parseGlobalOptions(restArgs);
+  cliOptions = options;
+
+  switch (cmd) {
+    case 'where':
+      cmdWhere(remaining);
+      break;
+    case 'related':
+      cmdRelated(remaining);
+      break;
+    case 'group':
+      cmdGroup();
+      break;
+    default:
+      console.error(`Unknown command: ${cmd}`);
+      console.error(`Run 'skill-asset --help' for available commands`);
+      process.exit(2);
+  }
+}
+
+main();
