@@ -3,13 +3,18 @@
 
 重构更新：
 - embedding_model 改为 bge-m3 (BAAI 中英双语嵌入模型)
+- 路径默认值锚定 backend/ 目录（绝对路径），不再依赖进程 CWD
 """
 
 from functools import lru_cache
+from pathlib import Path
 from typing import List, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# backend/ 目录绝对路径（config.py 位于 backend/app/core/ 下）
+_BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 
 
 class Settings(BaseSettings):
@@ -71,23 +76,23 @@ class Settings(BaseSettings):
     
     # 知识库配置
     knowledge_base_path: str = Field(
-        default="./data/knowledge_base",
+        default=str(_BACKEND_DIR / "data" / "knowledge_base"),
         description="知识库文件存储路径"
     )
     vector_store_path: str = Field(
-        default="./data/vector_store",
+        default=str(_BACKEND_DIR / "data" / "vector_store"),
         description="向量数据库存储路径"
     )
     
     # 文档生成配置
     output_dir: str = Field(
-        default="./output",
+        default=str(_BACKEND_DIR / "output"),
         description="生成文档的输出目录"
     )
     
-    # 项目根目录
+    # 项目根目录（模板/图片等资源的定位基准，不再依赖 CWD）
     base_dir: str = Field(
-        default=".",
+        default=str(_BACKEND_DIR),
         description="项目根目录"
     )
     
@@ -105,10 +110,7 @@ class Settings(BaseSettings):
     environment: str = Field(default="development", description="运行环境: development / production")
     
     # JWT 认证配置
-    secret_key: str = Field(default="", description="JWT secret key")
-    internal_api_key: str = Field(
-        default="", description="服务间 API Key；使用 get_api_key 的接口必须配置"
-    )
+    secret_key: str = Field(default="", description="JWT secret key（至少 32 字符，禁止占位值）")
     bootstrap_admin_username: str = Field(default="", description="首次启动时创建的管理员用户名")
     bootstrap_admin_password: str = Field(default="", description="首次启动时创建的管理员密码")
     

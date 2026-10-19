@@ -15,11 +15,12 @@ from sqlalchemy import delete, select, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 
-from app.agents.graphs import run_sales_agent
-from app.api.deps import get_current_session, verify_wechat_token
+from app.agents.graphs import run_sales_agent, clear_session_checkpoint
+from app.api.deps import get_current_session
 from app.core.config import settings
-from app.services.auth import get_current_user
 from app.core.logging import get_logger
+from app.core.prompts import guard_system_prompt, guard_user_content
+from app.services.auth import get_current_user
 from app.services.ws_manager import manager
 from app.services.image_service import find_car_images
 from app.services.rate_limiter import enforce_rate_limit
@@ -41,20 +42,39 @@ logger = get_logger("api.chat")
 router = APIRouter()
 
 async def _get_or_create_session_state(db: AsyncSession, session_id: str):
-    """获取或创建会话运行时状态（替代内存 dict/set）"""
+    """获取或创建会话运行时状态（DB 持久化，并发安全 upsert）"""
     result = await db.execute(
         select(ChatSessionState).where(ChatSessionState.session_id == session_id)
     )
     state = result.scalar_one_or_none()
     if not state:
-        state = ChatSessionState(
-            session_id=session_id,
-            handover_mode="ai",
-            high_intent_alerted=False,
-            status="active",
+        # 并发安全的插入：冲突时读取已有行（PostgreSQL ON CONFLICT DO NOTHING）
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        await db.execute(
+            pg_insert(ChatSessionState)
+            .values(
+                session_id=session_id,
+                handover_mode="ai",
+                high_intent_alerted=False,
+                status="active",
+            )
+            .on_conflict_do_nothing(index_elements=["session_id"])
         )
-        db.add(state)
         await db.flush()
+        result = await db.execute(
+            select(ChatSessionState).where(ChatSessionState.session_id == session_id)
+        )
+        state = result.scalar_one_or_none()
+        if state is None:  # 理论上不可达；防御性兜底
+            state = ChatSessionState(
+                session_id=session_id,
+                handover_mode="ai",
+                high_intent_alerted=False,
+                status="active",
+            )
+            db.add(state)
+            await db.flush()
     return state
 
 
@@ -193,14 +213,10 @@ async def chat(
     )
     
     try:
-        # 转换历史消息格式
-        history = []
-        for msg in request.history:
-            history.append({
-                "role": msg.role.value,
-                "content": msg.content,
-            })
-        
+        # 历史修复：不再把客户端 history 传入 Agent。对话记忆由 LangGraph checkpoint
+        # 以 thread_id=session_id 持久化维护；客户端传 history 会经 add_messages
+        # 与 checkpoint 合并造成消息重复膨胀，因此该字段已废弃、服务端直接忽略。
+
         # ═══ Issue #1 修复：检查接管模式（DB持久化） ═══
         handover_mode = "ai"
         if db is not None:
@@ -284,12 +300,13 @@ async def chat(
                 response_time_ms=int((time.time() - start_time) * 1000),
             )
 
-        # 运行 Agent 工作流
+        # 运行 Agent 工作流（历史由 checkpoint 维护；支持多模态图片输入）
         final_state = await run_sales_agent(
             session_id=actual_session_id,
             message=request.message,
             context=request.context,
-            history=history,
+            history=None,
+            input_image_url=request.input_image_url,
         )
         
         # 计算响应时间
@@ -659,32 +676,42 @@ async def list_customer_history(
 ):
     if current_user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
-    session_result = await db.execute(
-        select(distinct(Conversation.session_id)).where(
+    # 单条窗口函数查询：每个会话取最新一条 + 消息总数（修复 N+1 查询）
+    subq = (
+        select(
+            Conversation.session_id,
+            Conversation.content,
+            Conversation.created_at,
+            func.row_number()
+            .over(
+                partition_by=Conversation.session_id,
+                order_by=Conversation.created_at.desc(),
+            )
+            .label("rn"),
+            func.count(Conversation.id)
+            .over(partition_by=Conversation.session_id)
+            .label("msg_count"),
+        )
+        .where(
             Conversation.user_open_id == str(current_user["user_id"]),
-            Conversation.role == "user",
         )
+        .subquery()
     )
-    items = []
-    for session_id in session_result.scalars().all():
-        latest_result = await db.execute(
-            select(Conversation)
-            .where(Conversation.session_id == session_id)
-            .order_by(Conversation.created_at.desc())
-            .limit(1)
-        )
-        latest = latest_result.scalar_one_or_none()
-        count_result = await db.execute(
-            select(func.count(Conversation.id)).where(Conversation.session_id == session_id)
-        )
-        if latest:
-            items.append({
-                "session_id": session_id,
-                "preview": latest.content[:50],
-                "updated_at": latest.created_at.isoformat() if latest.created_at else None,
-                "message_count": count_result.scalar_one(),
-            })
-    items.sort(key=lambda item: item["updated_at"] or "", reverse=True)
+    stmt = (
+        select(subq.c.session_id, subq.c.content, subq.c.created_at, subq.c.msg_count)
+        .where(subq.c.rn == 1)
+        .order_by(subq.c.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    items = [
+        {
+            "session_id": row.session_id,
+            "preview": (row.content or "")[:50],
+            "updated_at": row.created_at.isoformat() if row.created_at else None,
+            "message_count": row.msg_count,
+        }
+        for row in result.all()
+    ]
     return {"sessions": items, "total": len(items)}
 
 
@@ -751,7 +778,9 @@ async def clear_chat_history(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
     await db.execute(delete(Conversation).where(Conversation.session_id == session_id))
     await db.execute(delete(ChatSessionState).where(ChatSessionState.session_id == session_id))
-    logger.info(f"[Session: {session_id}] 对话历史已清除")
+    # 同步清除 Agent 记忆（LangGraph checkpoint），否则"清除历史"后 AI 仍记得对话
+    await clear_session_checkpoint(session_id)
+    logger.info(f"[Session: {session_id}] 对话历史已清除（含 Agent 记忆）")
     return {
         "session_id": session_id,
         "status": "cleared",
@@ -837,6 +866,42 @@ async def handover_chat_session(
     await manager.broadcast_to_session("admin", event)
 
     return {"session_id": session_id, "handover_mode": body.mode}
+
+
+class SessionStatusRequest(BaseModel):
+    """会话状态流转请求体"""
+    status: str = Field(..., pattern="^(new|active|negotiating|closed|lost)$", description="会话状态")
+
+
+@router.patch(
+    "/chat/sessions/{session_id}/status",
+    summary="更新会话状态 (B端管理员)",
+    description="驱动报表漏斗：new → active → negotiating → closed / lost",
+)
+async def update_chat_session_status(
+    session_id: str,
+    body: SessionStatusRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """管理员更新聊天会话状态（驱动报表转化率/漏斗统计）"""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅管理员可访问")
+    state = await _get_or_create_session_state(db, session_id)
+    state.status = body.status
+    state.updated_at = datetime.now()
+    await db.flush()
+    await manager.broadcast_to_session(
+        "admin",
+        {
+            "type": "session_update",
+            "session_id": session_id,
+            "status": body.status,
+            "timestamp": datetime.now().isoformat(),
+        },
+    )
+    logger.info("[Session: %s] 状态更新为 %s", session_id, body.status)
+    return {"session_id": session_id, "status": body.status}
 
 
 @router.post(
@@ -944,7 +1009,7 @@ async def handover_chat_suggest(
 
     try:
         from langchain_openai import ChatOpenAI
-        from langchain.schema import SystemMessage, HumanMessage
+        from langchain_core.messages import SystemMessage, HumanMessage
 
         llm = ChatOpenAI(
             model=settings.default_model,
@@ -953,14 +1018,14 @@ async def handover_chat_suggest(
             temperature=0.7,
         )
 
-        system_prompt = """你是丰田汽车销售主管，正在为人工客服提供回复建议。
+        system_prompt = guard_system_prompt("""你是丰田汽车销售主管，正在为人工客服提供回复建议。
 根据对话上下文，生成2-3条可用的回复话术供客服选择。
 每条话术应简洁、专业、有说服力，能有效推进销售。
 
-以JSON数组格式返回: ["建议1", "建议2", "建议3"]"""
+以JSON数组格式返回: ["建议1", "建议2", "建议3"]""")
 
         user_prompt = f"""当前对话上下文：
-{conversation_text[-2000:]}
+{guard_user_content(conversation_text[-2000:])}
 
 请生成2-3条回复建议："""
 
@@ -994,7 +1059,10 @@ async def handover_chat_suggest(
 async def get_chat_handover_mode(
     session_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    """查询聊天会话的当前接管模式"""
+    """查询聊天会话的当前接管模式（管理员或会话所有者本人）"""
+    if current_user.get("role") != "admin":
+        await _assert_session_owner(db, session_id, current_user)
     state = await _get_or_create_session_state(db, session_id)
     return {"session_id": session_id, "handover_mode": state.handover_mode}

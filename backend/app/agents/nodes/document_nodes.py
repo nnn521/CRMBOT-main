@@ -10,7 +10,6 @@
 
 import json
 import os
-import subprocess
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -19,7 +18,8 @@ from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.agents.state import SalesState
+from app.core.prompts import guard_system_prompt, guard_user_content
+from app.agents.state import SalesState, strip_messages, state_update_with_reply
 from app.services.template_service import TemplateService
 from app.models.chat import (
     DocumentInfo,
@@ -33,6 +33,17 @@ from app.models.chat import (
 )
 
 logger = get_logger("document_nodes")
+
+
+def _sanitize_filename_component(value: Any, default: str = "文档") -> str:
+    """
+    文件名组件消毒：只保留字母数字/下划线/连字符/中文，并截断长度。
+
+    防止 LLM 提取的标题/客户名包含路径分隔符（如 ../）造成路径穿越写文件。
+    """
+    text = str(value or "").strip() or default
+    cleaned = "".join(c for c in text if c.isalnum() or c in "_-")
+    return (cleaned or default)[:30]
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -350,51 +361,19 @@ async def _generate_quote_document(params: Dict[str, Any]) -> DocumentInfo:
 
 async def _recalculate_excel(filepath: str):
     """
-    使用 LibreOffice 重新计算 Excel 公式（xlsx Skill 规范）
-    确保所有公式都被计算，零 #REF! / #DIV/0! 错误
+    公式重计算（当前为无操作）。
+
+    报价单使用 Python 直接写入计算结果（非公式驱动），文件内不存在未计算
+    的公式，因此无需 spawn LibreOffice 重算，避免每个文档额外数秒的开销。
     """
-    try:
-        # 检查是否有 recalc.py 脚本
-        recalc_script = os.path.join(settings.base_dir, "scripts", "recalc.py")
-        
-        if os.path.exists(recalc_script):
-            result = subprocess.run(
-                ["python", recalc_script, filepath],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            logger.info(f"[Excel] 公式重计算完成: {filepath}")
-            
-            # 检查是否有错误
-            if result.stdout:
-                try:
-                    import json
-                    recalc_result = json.loads(result.stdout)
-                    if recalc_result.get("status") == "errors_found":
-                        logger.warning(f"[Excel] 公式错误: {recalc_result.get('error_summary')}")
-                    else:
-                        logger.info(f"[Excel] 零公式错误验证通过")
-                except:
-                    pass
-        else:
-            # 降级：使用 libreoffice 直接计算
-            result = subprocess.run(
-                ["libreoffice", "--headless", "--calc", "--nolockcheck", filepath],
-                capture_output=True,
-                timeout=30
-            )
-            logger.info(f"[Excel] 使用 LibreOffice 重新计算完成")
-            
-    except Exception as e:
-        logger.warning(f"[Excel] 公式重计算跳过: {str(e)}")
-        # 不重计算不阻塞主流程
+    return None
 
 
 async def _fallback_quote_text(customer: str, products: List[Dict], valid_days: int, output_dir: str) -> DocumentInfo:
     """
     防御性降级：生成文本格式报价单（当 Excel 生成失败时）
     """
+    customer = _sanitize_filename_component(customer, "客户")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"报价单_{customer}_{timestamp}.txt"
     filepath = os.path.join(output_dir, filename)
@@ -446,10 +425,14 @@ async def _generate_proposal_document(params: Dict[str, Any]) -> DocumentInfo:
     
     output_dir = settings.output_dir
     os.makedirs(output_dir, exist_ok=True)
-    
-    customer = safe_get_param(params, "customer_name", "客户")
-    project = safe_get_param(params, "project_name", "方案")
-    
+
+    customer = _sanitize_filename_component(
+        safe_get_param(params, "customer_name", "客户"), "客户"
+    )
+    project = _sanitize_filename_component(
+        safe_get_param(params, "project_name", "方案"), "方案"
+    )
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"提案书_{customer}_{timestamp}.docx"
     filepath = os.path.join(output_dir, filename)
@@ -506,6 +489,8 @@ async def _generate_proposal_document(params: Dict[str, Any]) -> DocumentInfo:
 
 async def _fallback_proposal_text(customer: str, project: str, output_dir: str) -> DocumentInfo:
     """提案书文本降级版本"""
+    customer = _sanitize_filename_component(customer, "客户")
+    project = _sanitize_filename_component(project, "方案")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"提案书_{customer}_{timestamp}.txt"
     filepath = os.path.join(output_dir, filename)
@@ -1065,7 +1050,9 @@ async def _generate_analysis_document(params: Dict[str, Any]) -> DocumentInfo:
     output_dir = settings.output_dir
     os.makedirs(output_dir, exist_ok=True)
     
-    analysis_type = safe_get_param(params, "analysis_type", "销售数据分析")
+    analysis_type = _sanitize_filename_component(
+        safe_get_param(params, "analysis_type", "销售数据分析"), "销售数据分析"
+    )
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"数据分析报表_{analysis_type}_{timestamp}.xlsx"
     filepath = os.path.join(output_dir, filename)
@@ -1104,7 +1091,9 @@ async def _generate_presentation(params: Dict[str, Any]) -> DocumentInfo:
     output_dir = settings.output_dir
     os.makedirs(output_dir, exist_ok=True)
     
-    title = safe_get_param(params, "title", "演示文稿")
+    title = _sanitize_filename_component(
+        safe_get_param(params, "title", "演示文稿"), "演示文稿"
+    )
     timestamp = datetime.now().strftime("%Y%m%d")
     filename = f"演示文稿_{title}_{timestamp}.txt"
     filepath = os.path.join(output_dir, filename)
@@ -1315,20 +1304,23 @@ async def extract_document_params_node(state: SalesState) -> SalesState:
         state["document_params"] = {
             "intent": "quote_generation",
             "params": DEFAULT_PARAMS.copy(),
-            "missing": []
+            "missing": [],
+            "flow_active": False,
         }
         state["next_node"] = "generate_document"
-        return state
+        return strip_messages(state)
 
-    # 意图选择：当前消息是新的文档意图 → 用新的；否则沿用上一轮（多轮补参数）
+    # 意图选择：当前消息是文档意图 → 用当前意图；
+    # 只有上一轮确实在等待补充参数（flow_active）时才沿用旧意图。
+    # 否则闲聊/产品咨询会一直被拉回文档流程（P0-3）。
     current_intent = intent_analysis.intent if hasattr(intent_analysis, 'intent') else None
     doc_intents = {UserIntent.CONTRACT_DRAFTING, UserIntent.PROPOSAL_CREATION, UserIntent.QUOTE_GENERATION}
-    if prev_doc_intent and current_intent in doc_intents and current_intent.value != prev_doc_intent:
-        # 用户开始了新的文档请求，用当前意图
-        intent = current_intent
-        logger.info(f"[Params] 检测到新文档意图: {intent.value} (替换旧的 {prev_doc_intent})")
-    elif prev_doc_intent:
-        # 多轮补参数，沿用上一个文档意图
+    # flow_active 由 intent_recognition_node 每轮写入：仅当上一轮确实追问了参数、
+    # 且本轮用户没有提出新的非文档诉求时才为 True。
+    flow_active = bool(prev_doc_params.get("flow_active")) if isinstance(prev_doc_params, dict) else False
+
+    if prev_doc_intent and flow_active:
+        # 多轮补参数：沿用上一个文档意图
         intent_map = {
             "contract_drafting": UserIntent.CONTRACT_DRAFTING,
             "proposal_creation": UserIntent.PROPOSAL_CREATION,
@@ -1336,8 +1328,13 @@ async def extract_document_params_node(state: SalesState) -> SalesState:
         }
         intent = intent_map.get(prev_doc_intent, UserIntent.QUOTE_GENERATION)
         logger.info(f"[Params] 沿用上一轮的文档意图: {prev_doc_intent}")
+    elif current_intent is not None:
+        # 本轮明确提出了文档意图（新请求或切换文档类型）
+        intent = current_intent
+        if prev_doc_intent and current_intent.value != prev_doc_intent:
+            logger.info(f"[Params] 检测到新文档意图: {intent.value} (替换旧的 {prev_doc_intent})")
     else:
-        intent = intent_analysis.intent if hasattr(intent_analysis, 'intent') else UserIntent.QUOTE_GENERATION
+        intent = UserIntent.QUOTE_GENERATION
     
     try:
         llm = ChatOpenAI(
@@ -1348,12 +1345,12 @@ async def extract_document_params_node(state: SalesState) -> SalesState:
         )
         
         param_desc = PARAM_DESCRIPTIONS.get(intent, "请提取文档生成所需的所有参数")
-        
+
         prompt = PARAM_EXTRACTION_PROMPT.format(
             intent=intent.value if hasattr(intent, 'value') else str(intent),
             param_description=param_desc
         )
-        
+
         # 准备对话历史（防御性处理）
         messages_list = state.get("messages", [])
         history_text = "无历史消息"
@@ -1365,12 +1362,14 @@ async def extract_document_params_node(state: SalesState) -> SalesState:
                 ])
             except Exception as e:
                 logger.warning(f"[Params] 历史消息解析失败: {e}")
-        
+
         context = state.get("context", {})
-        
+
         messages = [
-            SystemMessage(content=prompt),
-            HumanMessage(content=f"对话历史：\n{history_text}\n\n当前业务上下文：{json.dumps(context, ensure_ascii=False)}")
+            SystemMessage(content=guard_system_prompt(prompt)),
+            HumanMessage(content=guard_user_content(
+                f"对话历史：\n{history_text}\n\n当前业务上下文：{json.dumps(context, ensure_ascii=False)}"
+            ))
         ]
         
         response = await llm.ainvoke(messages)
@@ -1392,9 +1391,16 @@ async def extract_document_params_node(state: SalesState) -> SalesState:
         state["document_params"] = {
             "intent": intent.value if hasattr(intent, 'value') else str(intent),
             "params": params,
-            "missing": missing
+            "missing": missing,
+            # 只有合同/提案的追问会在 generate_document 后继续等待用户补参数；
+            # 其他意图生成完即结束，不应影响后续对话的路由。
+            "flow_active": bool(missing) and intent in (
+                UserIntent.CONTRACT_DRAFTING,
+                UserIntent.PROPOSAL_CREATION,
+            ),
+            "flow_pending": True,
         }
-        
+
         # 关键参数缺失也不中断，直接填充默认值继续
         state["next_node"] = "generate_document"
         
@@ -1405,11 +1411,13 @@ async def extract_document_params_node(state: SalesState) -> SalesState:
             "intent": intent.value if hasattr(intent, 'value') else "quote_generation",
             "params": DEFAULT_PARAMS.copy(),
             "missing": [],
+            "flow_active": False,
+            "flow_pending": False,
             "_error": str(e)  # 记录错误但不阻断
         }
         state["next_node"] = "generate_document"
     
-    return state
+    return strip_messages(state)
 
 
 async def generate_document_node(state: SalesState) -> SalesState:
@@ -1433,18 +1441,18 @@ async def generate_document_node(state: SalesState) -> SalesState:
     
     doc_result = None
     error_msg = None
-    
+
+    # 意图映射（放在 try 之前：异常兜底需要知道用户原本要的文档类型）
+    intent_map = {
+        "quote_generation": UserIntent.QUOTE_GENERATION,
+        "proposal_creation": UserIntent.PROPOSAL_CREATION,
+        "contract_drafting": UserIntent.CONTRACT_DRAFTING,
+        "data_analysis": UserIntent.DATA_ANALYSIS,
+        "presentation_request": UserIntent.PRESENTATION_REQUEST,
+    }
+    intent = intent_map.get(intent_value, UserIntent.QUOTE_GENERATION)
+
     try:
-        # 意图映射
-        intent_map = {
-            "quote_generation": UserIntent.QUOTE_GENERATION,
-            "proposal_creation": UserIntent.PROPOSAL_CREATION,
-            "contract_drafting": UserIntent.CONTRACT_DRAFTING,
-            "data_analysis": UserIntent.DATA_ANALYSIS,
-            "presentation_request": UserIntent.PRESENTATION_REQUEST,
-        }
-        intent = intent_map.get(intent_value, UserIntent.QUOTE_GENERATION)
-        
         # 根据意图生成对应文档
         if intent == UserIntent.QUOTE_GENERATION:
             doc_result = await _generate_quote_document(params)
@@ -1455,7 +1463,7 @@ async def generate_document_node(state: SalesState) -> SalesState:
                 state["sales_response"] = missing_prompt
                 state["suggested_actions"] = ["提供客户名称", "提供项目名称"]
                 state["next_node"] = "end"
-                return state
+                return state_update_with_reply(state, missing_prompt)
             # 检查默认值比例：如果超过70%字段为默认/占位值，提示用户
             default_count, total_count = _count_default_params(params)
             if total_count > 0 and (default_count / total_count) > 0.70:
@@ -1472,7 +1480,7 @@ async def generate_document_node(state: SalesState) -> SalesState:
                 )
                 state["suggested_actions"] = ["先补充信息", "直接生成初版", "换个功能"]
                 state["next_node"] = "end"
-                return state
+                return state_update_with_reply(state, state["sales_response"])
             doc_result = await _generate_proposal_via_template(params)
         elif intent == UserIntent.CONTRACT_DRAFTING:
             # 根据合同类型选择不同的参数检查
@@ -1489,7 +1497,7 @@ async def generate_document_node(state: SalesState) -> SalesState:
                 )
                 state["suggested_actions"] = ["购车合同", "订车协议", "金融分期合同"]
                 state["next_node"] = "end"
-                return state
+                return state_update_with_reply(state, state["sales_response"])
             if contract_type == "order_agreement":
                 missing_prompt = _check_missing_params_for_order(params)
                 actions = ["提供客户名称", "提供车型", "确认定金金额"]
@@ -1503,7 +1511,7 @@ async def generate_document_node(state: SalesState) -> SalesState:
                 state["sales_response"] = missing_prompt
                 state["suggested_actions"] = actions
                 state["next_node"] = "end"
-                return state
+                return state_update_with_reply(state, missing_prompt)
             doc_result = await _generate_contract_document(params)
         elif intent == UserIntent.DATA_ANALYSIS:
             doc_result = await _generate_analysis_document(params)
@@ -1552,6 +1560,11 @@ async def generate_document_node(state: SalesState) -> SalesState:
         response_text = (
             f"这是您的{doc_type_name}，点击下方按钮即可下载。\n如需调整内容请随时告诉我。"
         )
+        if intent == UserIntent.CONTRACT_DRAFTING:
+            response_text += (
+                "\n\n⚠️ 本文件为 AI 起草的草稿，合同编号与签署信息需人工填写，"
+                "正式签署前请务必由专业法务人员审核。"
+            )
         if intent == UserIntent.PROPOSAL_CREATION:
             response_text += (
                 "\n\n💡 提案书基于已提供的信息生成，如需补充更多细节"
@@ -1572,22 +1585,44 @@ async def generate_document_node(state: SalesState) -> SalesState:
     except Exception as e:
         error_msg = str(e)
         logger.error(f"[Document] 生成失败: {error_msg}")
-        
-        # 防御性兜底：即使失败也生成一个文本文件
+
+        # 防御性兜底：按用户原本要求的文档类型生成降级版本，
+        # 绝不把用户要的提案书/报表/演示文稿"偷换"成默认报价单。
+        fallback_result = None
         try:
-            fallback_result = await _generate_quote_document({})  # 空参数触发全默认
+            if intent == UserIntent.QUOTE_GENERATION:
+                # 空参数触发全默认报价单
+                fallback_result = await _generate_quote_document({})
+            elif intent == UserIntent.PRESENTATION_REQUEST:
+                # 演示文稿本身即文本大纲，用默认标题重试一次
+                fallback_result = await _generate_presentation({})
+            elif intent == UserIntent.PROPOSAL_CREATION:
+                fallback_result = await _fallback_proposal_text("客户", "方案", settings.output_dir)
+            elif intent == UserIntent.CONTRACT_DRAFTING:
+                fallback_result = await _generate_contract_document({})
+            else:
+                # 数据分析等格式要求较高的文档，不伪造内容
+                fallback_result = None
+        except Exception as fallback_error:
+            logger.critical(f"[Document] 兜底生成也失败: {fallback_error}")
+            fallback_result = None
+
+        if fallback_result is not None:
             state["generated_documents"].append(fallback_result)
-            download_url = f"/api/v1/docs/documents/{fallback_result.file_name}"
+            fallback_names = {
+                UserIntent.QUOTE_GENERATION: "默认报价单",
+                UserIntent.PRESENTATION_REQUEST: "演示文稿大纲",
+                UserIntent.PROPOSAL_CREATION: "通用提案书",
+                UserIntent.CONTRACT_DRAFTING: "合同草稿",
+            }
+            fallback_name = fallback_names.get(intent, "降级文档")
             state["sales_response"] = (
-                f"⚠️ 已为您生成默认报价单，点击下方按钮即可下载。\n"
+                f"⚠️ 原内容生成遇到问题，已为您生成{fallback_name}，点击下方按钮即可下载。\n"
                 f"如需调整请告诉我具体需求。"
             )
-        except Exception as fallback_error:
-            # 最终兜底：只返回文字
-            logger.critical(f"[Document] 兜底生成也失败: {fallback_error}")
+        else:
             state["sales_response"] = (
-                "抱歉，文档生成服务暂时不可用。请稍后重试，或直接联系您的专属销售顾问。\n"
-                "联系电话：400-XXX-XXXX"
+                "抱歉，文档生成服务暂时不可用。请稍后重试，或直接联系您的专属销售顾问。"
             )
     
     # 确保 sales_response 绝不返回 None（防御 Pydantic 校验失败）
@@ -1598,24 +1633,10 @@ async def generate_document_node(state: SalesState) -> SalesState:
         state["suggested_actions"] = ["继续咨询", "重新生成"]
     
     state["next_node"] = "end"
-    return state
+    return state_update_with_reply(state, state["sales_response"])
 
 
 # ═══════════════════════════════════════════════════════════════
-# 保留但标记为过时的节点（兼容性）
+# 旧节点已移除：request_missing_params_node / clarify_document_type_node
+# 重构后策略：参数提取节点直接放行到生成节点，不再中断询问
 # ═══════════════════════════════════════════════════════════════
-
-async def request_missing_params_node(state: SalesState) -> SalesState:
-    """
-    请求缺失参数节点 - 已简化
-    
-    重构后策略：不再中断询问，直接填充默认值继续
-    此节点保留用于兼容性，实际直接跳转到生成
-    """
-    logger.info(f"[Session: {state.get('session_id', 'unknown')}] 跳过参数询问，使用默认值")
-    
-    # 直接放行到生成节点
-    state["next_node"] = "generate_document"
-    state["sales_response"] = None  # 不提前返回，等生成后再统一返回
-    
-    return state

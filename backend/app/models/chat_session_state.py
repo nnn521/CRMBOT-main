@@ -16,4 +16,9 @@ class ChatSessionState(Base):
     handover_mode = Column(String(10), nullable=False, default="ai", comment="接管模式: ai / human")
     high_intent_alerted = Column(Boolean, nullable=False, default=False, comment="是否已触发高意向提醒")
     status = Column(String(20), nullable=False, default="active", comment="会话状态: new/active/closed")
-    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), comment="最后更新时间")
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        comment="最后更新时间"
+    )

@@ -13,6 +13,7 @@
     filepath = await svc.fill_contract("car_purchase", {"buyer_name": "张三", ...})
 """
 
+import asyncio
 import os
 import re
 from datetime import datetime
@@ -104,14 +105,17 @@ class TemplateService:
             生成文件的绝对路径
         """
         template_path = self._get_template_path(template_key)
-        doc = Document(template_path)
+        # python-docx 为同步阻塞 I/O，放入线程池避免卡住事件循环
+        doc = await asyncio.to_thread(Document, template_path)
 
         # 自动填充标准字段
+        # 安全修复：签署日期不再自动填当天，合同编号带"草稿"前缀，
+        # 避免 AI 生成的合同被误认为已生效的法律文书。
         auto_fields = {
-            "sign_date": datetime.now().strftime("%Y年%m月%d日"),
+            "sign_date": "",
             "proposal_date": datetime.now().strftime("%Y年%m月%d日"),
-            "contract_no": f"C{datetime.now().strftime('%Y%m%d%H%M%S')}",
-            "agreement_no": f"A{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            "contract_no": f"草稿-C{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            "agreement_no": f"草稿-A{datetime.now().strftime('%Y%m%d%H%M%S')}",
             "proposal_no": f"P{datetime.now().strftime('%Y%m%d%H%M%S')}",
         }
         merged_data = {**auto_fields, **data}
@@ -133,7 +137,7 @@ class TemplateService:
             output_filename = f"{template_key}_{timestamp}.docx"
 
         output_path = os.path.join(output_dir, output_filename)
-        doc.save(output_path)
+        await asyncio.to_thread(doc.save, output_path)
 
         logger.info(f"[Template] 模板填充完成: {template_key} -> {output_path}")
         return output_path

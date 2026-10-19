@@ -72,8 +72,9 @@ async def hermes_health(_admin: dict = Depends(require_admin)):
             return {"online": False, "status_code": resp.status_code}
     except httpx.TimeoutException:
         return {"online": False, "detail": "Hermes 连接超时"}
-    except Exception as e:
-        return {"online": False, "detail": str(e)}
+    except Exception:
+        # 不回传内部异常细节，避免泄露 Hermes 内部信息
+        return {"online": False, "detail": "Hermes 不可用"}
 
 
 @router.post("/chat")
@@ -101,12 +102,15 @@ async def hermes_chat(
     except httpx.HTTPStatusError as e:
         raise HTTPException(
             status_code=e.response.status_code if e.response else 502,
-            detail=f"Hermes 错误: {e}",
+            detail=f"Hermes 错误: {e.response.status_code if e.response else '未知'}",
         )
     except HTTPException:
         raise  # 不二次包装 FastAPI 自己的异常
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Hermes 不可用: {str(e)}")
+        # 记录真实错误到服务端日志，响应只返回通用提示
+        from app.core.logging import get_logger
+        get_logger("api.hermes").warning(f"Hermes 转发失败: {e}")
+        raise HTTPException(status_code=502, detail="Hermes 不可用")
 
 
 @router.post("/chat/stream")
@@ -123,13 +127,18 @@ async def hermes_chat_stream(
         # 注意：不能使用 async with，因为 StreamingResponse 的 generator
         # 在函数返回后才被消费；async with 会提前关闭 client，导致流中断。
         client = httpx.AsyncClient(timeout=httpx.Timeout(30.0))
-        req = client.build_request(
-            "POST",
-            f"{settings.HERMES_API_URL}/chat/completions",
-            json=_build_hermes_body(body.messages, stream=True),
-            headers=_hermes_headers(),
-        )
-        resp = await client.send(req, stream=True)
+        try:
+            req = client.build_request(
+                "POST",
+                f"{settings.HERMES_API_URL}/chat/completions",
+                json=_build_hermes_body(body.messages, stream=True),
+                headers=_hermes_headers(),
+            )
+            resp = await client.send(req, stream=True)
+        except Exception:
+            # 请求未建立成功时立即关闭客户端，防止连接泄漏
+            await client.aclose()
+            raise
 
         if resp.status_code >= 400:
             error_body = await resp.aread()

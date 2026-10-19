@@ -8,6 +8,10 @@
     GET /api/v1/images/{model_name}       - 获取车型图片（返回第一张）
     GET /api/v1/images/{model_name}/list  - 列出车型所有图片
     GET /api/v1/images/                   - 列出所有有图片的车型
+
+安全：
+- 所有按名称解析目录的端点统一经过 _resolve_model_dir 的 realpath 围栏，
+  杜绝 ../ 路径穿越（产品图属于公开静态资源，故不要求登录，但不允许越界读取）。
 """
 
 import os
@@ -24,10 +28,31 @@ logger = get_logger("images_api")
 router = APIRouter(prefix="/images", tags=["车型图片"])
 
 # 支持的图片格式
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"}
 
 # 图片根目录
 IMAGES_DIR = os.path.realpath(os.path.join(settings.base_dir, "data", "images"))
+
+
+def _resolve_model_dir(model_name: str) -> str:
+    """
+    解析车型目录路径，强制约束在 IMAGES_DIR 内。
+
+    - 拒绝路径分隔符与 .. 段（model_name 必须为单个目录名）
+    - realpath 解析后校验 commonpath 包含关系，防止符号链接/编码绕过
+    """
+    if not model_name or model_name in (".", ".."):
+        raise HTTPException(status_code=400, detail="无效的车型名称")
+    if ".." in model_name or "/" in model_name or "\\" in model_name:
+        raise HTTPException(status_code=400, detail="无效的车型名称")
+
+    model_dir = os.path.realpath(os.path.join(IMAGES_DIR, model_name))
+    try:
+        if os.path.commonpath([IMAGES_DIR, model_dir]) != IMAGES_DIR:
+            raise HTTPException(status_code=403, detail="禁止访问")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的车型名称")
+    return model_dir
 
 
 def _get_image_files(directory: str) -> list[str]:
@@ -65,7 +90,7 @@ async def list_models():
 @router.get("/{model_name}")
 async def get_model_image(model_name: str):
     """获取车型图片（返回目录下第一张图片）"""
-    model_dir = os.path.join(IMAGES_DIR, model_name)
+    model_dir = _resolve_model_dir(model_name)
 
     if not os.path.isdir(model_dir):
         raise HTTPException(status_code=404, detail=f"未找到车型 '{model_name}' 的图片目录")
@@ -85,7 +110,7 @@ async def get_model_image(model_name: str):
 @router.get("/{model_name}/list")
 async def list_model_images(model_name: str):
     """列出车型的所有图片"""
-    model_dir = os.path.join(IMAGES_DIR, model_name)
+    model_dir = _resolve_model_dir(model_name)
 
     if not os.path.isdir(model_dir):
         raise HTTPException(status_code=404, detail=f"未找到车型 '{model_name}' 的图片目录")
@@ -107,11 +132,15 @@ async def list_model_images(model_name: str):
 @router.get("/{model_name}/{filename}")
 async def get_specific_image(model_name: str, filename: str):
     """获取车型的指定图片"""
-    image_path = os.path.realpath(os.path.join(IMAGES_DIR, model_name, filename))
-    
-    # 路径遍历防护：确保解析后的路径在 IMAGES_DIR 内
-    if not image_path.startswith(IMAGES_DIR + os.sep):
-        logger.warning(f"[Images] 路径遍历攻击尝试: model_name={model_name}, filename={filename}")
+    model_dir = _resolve_model_dir(model_name)
+    image_path = os.path.realpath(os.path.join(model_dir, filename))
+
+    # 路径遍历防护：确保解析后的路径在 model_dir 内
+    try:
+        if os.path.commonpath([model_dir, image_path]) != model_dir:
+            logger.warning(f"[Images] 路径遍历攻击尝试: model_name={model_name}, filename={filename}")
+            raise HTTPException(status_code=403, detail="禁止访问")
+    except ValueError:
         raise HTTPException(status_code=403, detail="禁止访问")
 
     if not os.path.isfile(image_path):

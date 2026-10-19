@@ -21,7 +21,8 @@ from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.agents.state import SalesState
+from app.core.prompts import guard_system_prompt, guard_user_content
+from app.agents.state import SalesState, strip_messages
 from app.models.chat import IntentAnalysisResult, UserIntent
 
 logger = get_logger("intent_node")
@@ -296,6 +297,60 @@ INTENT_PROMPT = """你是一位丰田汽车销售顾问的意图识别专家，�
 # 路由决策函数
 # ═══════════════════════════════════════════════════════════════
 
+_DOC_INTENTS = {
+    UserIntent.QUOTE_GENERATION,
+    UserIntent.PROPOSAL_CREATION,
+    UserIntent.CONTRACT_DRAFTING,
+    UserIntent.DATA_ANALYSIS,
+    UserIntent.PRESENTATION_REQUEST,
+    UserIntent.DOCUMENT_REQUEST,
+}
+
+# 用户明确表示不再需要当前文档
+_FLOW_CANCEL_KEYWORDS = ("算了", "不用了", "不需要了", "取消", "先不", "不弄了")
+# 提问式消息（而不是补充参数）——此时不应把对话拉回文档流程
+_QUESTION_MARKERS = ("?", "？", "吗", "呢", "怎么", "如何", "为什么", "哪个", "哪些", "多少", "什么")
+
+
+def _update_document_flow(state: SalesState, intent: UserIntent, message: str) -> None:
+    """
+    维护 document_params 的流程生命周期（P0-3）。
+
+    字段含义：
+    - flow_active: 助手仍在等待用户补充文档参数；
+    - flow_pending: 该等待只对紧接着的下一轮用户消息有效。
+
+    规则（只影响路由，不改变任何文档内容）：
+    - 本轮是文档意图 → 交给 extract_document_params_node 重置流程；
+    - 用户明确取消 → 立即关闭；
+    - 用户提出的是问题而非补充参数 → 关闭，避免"答非所问的追问"；
+    - 其余情况保留一轮等待窗口，下一轮结束后自动失效。
+    """
+    doc_params = state.get("document_params")
+    if not isinstance(doc_params, dict) or not doc_params.get("flow_active"):
+        return
+    if intent in _DOC_INTENTS:
+        return
+
+    updated = dict(doc_params)  # 不原地修改 checkpoint 中的对象
+    stripped = (message or "").strip()
+    if any(kw in stripped for kw in _FLOW_CANCEL_KEYWORDS):
+        updated["flow_active"] = False
+        updated["flow_pending"] = False
+        logger.info("[Flow] 用户明确取消文档流程")
+    elif any(marker in stripped for marker in _QUESTION_MARKERS):
+        updated["flow_active"] = False
+        updated["flow_pending"] = False
+        logger.info("[Flow] 用户转入其他提问，关闭文档参数追问")
+    elif not updated.get("flow_pending"):
+        # 追问后已经过了一轮，流程自动失效，不能无限期吸附后续对话
+        updated["flow_active"] = False
+        logger.info("[Flow] 文档参数追问已过期，关闭流程")
+    else:
+        updated["flow_pending"] = False  # 用掉唯一一次补参数窗口
+    state["document_params"] = updated
+
+
 def determine_next_node(intent: UserIntent) -> str:
     """
     根据意图决定下一个节点
@@ -397,7 +452,7 @@ async def intent_recognition_node(state: SalesState) -> SalesState:
         state["intent_analysis"] = DEFAULT_INTENT_ANALYSIS
         state["next_node"] = "sales_response"
         state["context"] = state.get("context", {})
-        return state
+        return strip_messages(state)
     
     # ═══ 调用 LLM 进行意图识别 ═══
     try:
@@ -409,8 +464,8 @@ async def intent_recognition_node(state: SalesState) -> SalesState:
         )
         
         messages = [
-            SystemMessage(content=INTENT_PROMPT),
-            HumanMessage(content=f"请分析以下客户消息：\n\n{user_message}")
+            SystemMessage(content=guard_system_prompt(INTENT_PROMPT)),
+            HumanMessage(content=f"请分析以下客户消息：\n\n{guard_user_content(user_message)}")
         ]
         
         response = await llm.ainvoke(messages)
@@ -422,9 +477,10 @@ async def intent_recognition_node(state: SalesState) -> SalesState:
         logger.error(f"[Intent] LLM 调用失败: {e}")
         # LLM 调用失败，使用兜底解析
         state["intent_analysis"] = _fallback_keyword_intent(user_message)
+        _update_document_flow(state, state["intent_analysis"].intent, user_message)
         state["next_node"] = determine_next_node(state["intent_analysis"].intent)
         state["context"] = _extract_entities_from_message(state.get("context", {}), user_message)
-        return state
+        return strip_messages(state)
     
     # ═══ 三层 JSON 解析 ═══
     parsed_dict = safe_parse_json(raw_response)
@@ -480,6 +536,9 @@ async def intent_recognition_node(state: SalesState) -> SalesState:
     if input_image_url:
         context["input_image_url"] = input_image_url
     
+    # ═══ 文档流程生命周期（P0-3）═══
+    _update_document_flow(state, intent_analysis.intent, user_message)
+
     # ═══ 组装输出 State（纯净字典）═══
     state["intent_analysis"] = intent_analysis
     state["context"] = context
@@ -496,8 +555,9 @@ async def intent_recognition_node(state: SalesState) -> SalesState:
         "confidence": intent_analysis.confidence,
         "has_image": bool(input_image_url),
     }
-    
-    return state
+
+    # 剥离 messages 后返回（messages 通道由 add_messages 管理，避免重复追加）
+    return strip_messages(state)
 
 
 def _fallback_keyword_intent(user_message: str) -> IntentAnalysisResult:

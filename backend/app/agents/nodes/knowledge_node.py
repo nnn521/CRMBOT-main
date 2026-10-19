@@ -8,6 +8,8 @@
 4. 防御性编程：任何情况下不报错，返回干净 state
 """
 
+import asyncio
+import json
 import os
 from typing import Dict, Any, List, Optional
 
@@ -18,10 +20,16 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.prompts import guard_system_prompt, guard_user_content
 from app.services.image_service import find_car_images, requested_image_count
-from app.agents.state import SalesState
+from app.agents.state import SalesState, strip_messages
 
 logger = get_logger("knowledge_node")
+
+# FAISS 返回的是平方 L2 距离。Ollama bge-m3 输出归一化向量，
+# 平方 L2 = 2 - 2·cos(相似度)：阈值 1.2 约等于 cos ≥ 0.4 才保留，
+# 低于该相似度的结果视为噪声丢弃。
+RELEVANCE_THRESHOLD = 1.2
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -149,7 +157,70 @@ class KnowledgeBaseService:
         self.vector_store: Optional[FAISS] = None
         self._initialized: bool = False
         self._init_error: Optional[str] = None
-    
+        # 并发保护：冷启动时多个请求同时触发 initialize() 只会建一次索引
+        self._lock = asyncio.Lock()
+
+    # ═══════════════════════════════════════════════════════════
+    # 安全持久化：不依赖 pickle 反序列化
+    # ═══════════════════════════════════════════════════════════
+    #
+    # FAISS.load_local 需要 allow_dangerous_deserialization=True 才能读取
+    # index.pkl（pickle 反序列化 = 任意代码执行）。生产环境不能打开该开关，
+    # 因此改为：
+    #   1. 优先读取 kb_documents.json（纯 JSON，无代码执行风险）；
+    #   2. 无 JSON 时从 knowledge_base 目录的源文档重建索引；
+    #   3. 重建后写出 JSON 快照，下次启动直接复用（仍需重新 embedding）。
+
+    def _documents_snapshot_path(self) -> str:
+        return os.path.join(settings.vector_store_path, "kb_documents.json")
+
+    def _write_documents_snapshot(self, documents: List) -> None:
+        """把切片后的文本块写入 JSON 快照（原子替换，失败不影响主流程）。"""
+        try:
+            os.makedirs(settings.vector_store_path, exist_ok=True)
+            payload = [
+                {
+                    "content": doc.page_content,
+                    "metadata": doc.metadata if isinstance(doc.metadata, dict) else {},
+                }
+                for doc in documents
+            ]
+            target = self._documents_snapshot_path()
+            tmp = f"{target}.tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False)
+            os.replace(tmp, target)
+            logger.info(f"[KB] 文档快照已写入: {target} ({len(payload)} 块)")
+        except Exception as e:
+            logger.warning(f"[KB] 文档快照写入失败（非阻塞）: {e}")
+
+    def _read_documents_snapshot(self) -> Optional[List]:
+        """读取 JSON 快照；不存在或损坏时返回 None。"""
+        path = self._documents_snapshot_path()
+        if not os.path.isfile(path):
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+            if not isinstance(payload, list) or not payload:
+                return None
+            # 延迟导入，避免模块级额外依赖
+            from langchain_core.documents import Document
+
+            documents = [
+                Document(
+                    page_content=str(item.get("content", "")),
+                    metadata=item.get("metadata") if isinstance(item.get("metadata"), dict) else {},
+                )
+                for item in payload
+                if isinstance(item, dict) and item.get("content")
+            ]
+            logger.info(f"[KB] 已读取文档快照: {len(documents)} 块")
+            return documents or None
+        except Exception as e:
+            logger.warning(f"[KB] 文档快照读取失败: {e}")
+            return None
+
     def _ensure_knowledge_base_dir(self) -> str:
         """
         确保知识库目录存在
@@ -270,11 +341,14 @@ class KnowledgeBaseService:
         logger.error(f"[KB] 无法解码文件: {filename}，已跳过")
         return None
     
-    def _create_vector_store_from_documents(self, documents: List) -> Optional[FAISS]:
+    async def _create_vector_store_from_documents(
+        self, documents: List, save_snapshot: bool = True
+    ) -> Optional[FAISS]:
         """
         从文档创建向量存储
-        
-        使用 RecursiveCharacterTextSplitter 进行智能切片
+
+        使用 RecursiveCharacterTextSplitter 进行智能切片；
+        save_snapshot=True 时额外写入 JSON 快照，供下次启动安全重建。
         """
         if not documents:
             logger.warning("[KB] 没有文档可处理")
@@ -296,10 +370,16 @@ class KnowledgeBaseService:
                 logger.warning("[KB] 切片后没有文本块")
                 return None
             
-            # 创建向量存储
-            vector_store = FAISS.from_documents(split_docs, self.embeddings)
+            # 创建向量存储（同步阻塞，放入线程池）
+            vector_store = await asyncio.to_thread(
+                FAISS.from_documents, split_docs, self.embeddings
+            )
             logger.info(f"[KB] 向量存储创建成功，包含 {len(split_docs)} 个向量")
-            
+
+            # 写入安全快照（纯 JSON），下次启动无需 pickle 反序列化
+            if save_snapshot:
+                await asyncio.to_thread(self._write_documents_snapshot, split_docs)
+
             return vector_store
             
         except Exception as e:
@@ -309,90 +389,110 @@ class KnowledgeBaseService:
     async def initialize(self) -> bool:
         """
         初始化知识库（延迟加载）
-        
+
         返回值：
             bool: 初始化是否成功（无论成功与否都不抛异常）
         """
         if self._initialized:
             return True
-        
-        try:
-            # 步骤 1：初始化 Embedding 模型（本地 Ollama bge-m3）
-            logger.info(f"[KB] 初始化 Embedding 模型: {settings.embedding_model}")
-            
-            # 使用本地 OllamaEmbeddings 替代智谱
-            self.embeddings = OllamaEmbeddings(
-                model=settings.embedding_model,
-                base_url=settings.ollama_base_url,
-            )
-            
-            # 步骤 2：确保知识库目录和默认文档
-            kb_path = self._ensure_knowledge_base_dir()
-            
-            # 步骤 3：尝试加载已有向量库
+
+        async with self._lock:
+            if self._initialized:
+                return True
+
             try:
-                # 使用同步方法加载，避免 aload_local 版本兼容问题
-                import asyncio
-                
-                # 安全检查：仅在开发环境允许危险反序列化
+                # 步骤 1：初始化 Embedding 模型（本地 Ollama bge-m3）
+                logger.info(f"[KB] 初始化 Embedding 模型: {settings.embedding_model}")
+
+                # 使用本地 OllamaEmbeddings 替代智谱
+                self.embeddings = OllamaEmbeddings(
+                    model=settings.embedding_model,
+                    base_url=settings.ollama_base_url,
+                )
+
+                # 步骤 2：确保知识库目录和默认文档
+                kb_path = self._ensure_knowledge_base_dir()
+
+                # 步骤 3：优先读取安全 JSON 快照，避免依赖 pickle 反序列化。
+                # 开发环境仍允许读取旧的 FAISS 本地索引（便于本地调试）。
+                snapshot_docs = self._read_documents_snapshot()
+                if snapshot_docs:
+                    self.vector_store = await self._create_vector_store_from_documents(
+                        snapshot_docs, save_snapshot=False
+                    )
+                    if self.vector_store is not None:
+                        self._initialized = True
+                        logger.info("[KB] 已从 JSON 快照重建向量库（无需危险反序列化）")
+                        return True
+                    logger.warning("[KB] JSON 快照重建失败，回退到本地文档重建")
+
                 allow_dangerous = settings.environment.lower() == "development"
                 if allow_dangerous:
-                    logger.warning("[KB] FAISS allow_dangerous_deserialization is enabled — do NOT use in production")
+                    try:
+                        logger.warning(
+                            "[KB] FAISS allow_dangerous_deserialization is enabled — do NOT use in production"
+                        )
+                        self.vector_store = await asyncio.to_thread(
+                            FAISS.load_local,
+                            settings.vector_store_path,
+                            self.embeddings,
+                            allow_dangerous_deserialization=True,
+                        )
+                        logger.info("[KB] 已有向量库加载成功（development 模式）")
+                        self._initialized = True
+                        return True
+                    except Exception as e:
+                        logger.info(f"[KB] 未找到现有向量库或加载失败: {e}")
+                        logger.info("[KB] 将从本地文档重新创建...")
                 else:
-                    logger.info("[KB] Production mode: FAISS dangerous deserialization disabled")
-                
-                self.vector_store = await asyncio.to_thread(
-                    FAISS.load_local,
-                    settings.vector_store_path,
-                    self.embeddings,
-                    allow_dangerous_deserialization=allow_dangerous
+                    # 生产环境：绝不打开 pickle 反序列化。
+                    # 未读取到 JSON 快照时直接从源文档重建索引。
+                    logger.info("[KB] Production mode: skip pickle index, rebuild from knowledge_base")
+
+                # 步骤 4：从本地文档创建向量库
+                documents = self._load_documents_from_directory(kb_path)
+
+                if not documents:
+                    logger.warning("[KB] 未找到任何文档，将使用默认汽车知识库")
+                    if settings.environment.lower() != "development":
+                        # 生产环境不把默认知识库写成快照，避免掩盖业务数据缺失
+                        logger.warning(
+                            "[KB] knowledge_base 为空；请挂载业务知识库或运行 scripts/build_vector_store.py"
+                        )
+                    # 使用文本切片后统一走 _create_vector_store_from_documents
+                    from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+                    splitter = RecursiveCharacterTextSplitter(
+                        chunk_size=500,
+                        chunk_overlap=50,
+                        length_function=len,
+                        separators=["\n\n", "\n", "。", "，", " ", ""],
+                    )
+                    documents = splitter.create_documents(
+                        [DEFAULT_KNOWLEDGE_BASE],
+                        metadatas=[{"source": "default_knowledge_base.md"}],
+                    )
+
+                self.vector_store = await self._create_vector_store_from_documents(
+                    documents, save_snapshot=True
                 )
-                logger.info("[KB] 已有向量库加载成功")
+
+                # ═══ 最终检查：确保初始化成功后向量库必须存在 ═══
+                if self.vector_store is None:
+                    logger.error("[KB] 初始化流程完成但向量库为 None，标记为失败")
+                    self._init_error = "初始化后向量库仍为 None"
+                    self._initialized = False
+                    return False
+
                 self._initialized = True
                 return True
-                
+
             except Exception as e:
-                logger.info(f"[KB] 未找到现有向量库或加载失败: {e}")
-                logger.info("[KB] 将从本地文档重新创建...")
-            
-            # 步骤 4：从本地文档创建向量库
-            documents = self._load_documents_from_directory(kb_path)
-            
-            if not documents:
-                logger.warning("[KB] 未找到任何文档，将使用默认汽车知识库")
-                # 【多模态】使用汽车默认知识库
-                self.vector_store = FAISS.from_texts(
-                    [DEFAULT_KNOWLEDGE_BASE],
-                    self.embeddings
-                )
-            else:
-                self.vector_store = self._create_vector_store_from_documents(documents)
-            
-            # 步骤 5：保存向量库（如果创建成功）
-            if self.vector_store:
-                try:
-                    os.makedirs(settings.vector_store_path, exist_ok=True)
-                    self.vector_store.save_local(settings.vector_store_path)
-                    logger.info(f"[KB] 向量库已保存到: {settings.vector_store_path}")
-                except Exception as e:
-                    logger.warning(f"[KB] 向量库保存失败（非阻塞）: {e}")
-            
-            # ═══ 最终检查：确保初始化成功后向量库必须存在 ═══
-            if self.vector_store is None:
-                logger.error("[KB] 初始化流程完成但向量库为 None，标记为失败")
-                self._init_error = "初始化后向量库仍为 None"
+                self._init_error = str(e)
+                logger.error(f"[KB] 知识库初始化失败: {e}")
+                # 初始化失败不抛异常，设置标志让后续调用知道状态
                 self._initialized = False
                 return False
-            
-            self._initialized = True
-            return True
-            
-        except Exception as e:
-            self._init_error = str(e)
-            logger.error(f"[KB] 知识库初始化失败: {e}")
-            # 初始化失败不抛异常，设置标志让后续调用知道状态
-            self._initialized = False
-            return False
     
     async def search(
         self, 
@@ -436,13 +536,14 @@ class KnowledgeBaseService:
         
         try:
             logger.info(f"[KB] 执行检索: query='{query[:50]}...', top_k={top_k}")
-            
-            # 执行相似度搜索
-            docs_with_scores = self.vector_store.similarity_search_with_score(
-                query, 
+
+            # 执行相似度搜索（FAISS 为同步阻塞调用，放入线程池避免卡住事件循环）
+            docs_with_scores = await asyncio.to_thread(
+                self.vector_store.similarity_search_with_score,
+                query,
                 k=top_k
             )
-            
+
             results = []
             for doc, score in docs_with_scores:
                 result = {
@@ -452,14 +553,14 @@ class KnowledgeBaseService:
                     "source": doc.metadata.get("source", "unknown")
                 }
                 results.append(result)
-            
-            # 过滤低相关度结果（L2距离，越小越相似，阈值设为 1.5）
-            filtered_results = [r for r in results if r["score"] < 1.5]
-            
+
+            # 过滤低相关度结果（平方 L2 距离：阈值见 RELEVANCE_THRESHOLD 说明）
+            filtered_results = [r for r in results if r["score"] < RELEVANCE_THRESHOLD]
+
             logger.info(f"[KB] 检索完成: 原始 {len(results)} 条, 过滤后 {len(filtered_results)} 条")
-            
+
             return filtered_results
-            
+
         except Exception as e:
             logger.error(f"[KB] 知识库检索失败: {e}")
             return []
@@ -480,9 +581,26 @@ class KnowledgeBaseService:
             return False
         
         try:
-            self.vector_store.add_texts(texts, metadatas=metadatas)
-            # 保存到本地
-            self.vector_store.save_local(settings.vector_store_path)
+            await asyncio.to_thread(
+                self.vector_store.add_texts, texts, metadatas=metadatas
+            )
+            # 保存到本地（FAISS 原生格式仅在同一环境下可安全重建）
+            try:
+                self.vector_store.save_local(settings.vector_store_path)
+            except Exception as e:
+                # save_local 写入的 index.pkl 在生产环境不会被读取，
+                # 因此这里失败不影响 JSON 快照路径
+                logger.warning(f"[KB] FAISS 本地保存失败（非阻塞）: {e}")
+
+            # 同步追加到 JSON 快照，保证生产环境下次启动能安全重建
+            snapshot = self._read_documents_snapshot() or []
+            from langchain_core.documents import Document
+
+            for i, text in enumerate(texts):
+                metadata = metadatas[i] if metadatas and i < len(metadatas) and isinstance(metadatas[i], dict) else {}
+                snapshot.append(Document(page_content=text, metadata=metadata))
+            await asyncio.to_thread(self._write_documents_snapshot, snapshot)
+
             logger.info(f"[KB] 成功添加 {len(texts)} 个文档到知识库")
             return True
             
@@ -579,7 +697,7 @@ async def knowledge_retrieval_node(state: SalesState) -> SalesState:
             for i, result in enumerate(results[:3], 1):  # 只打印前3条
                 logger.info(f"[KB Node] [结果 {i}] Source: {result['source']}, Score: {result['score']:.3f}")
                 logger.info(f"[KB Node] [结果 {i}] Content: {result['content'][:100]}...")
-            
+
             # 有知识库结果，进入知识整合节点
             state["next_node"] = "knowledge_synthesis"
         else:
@@ -589,9 +707,9 @@ async def knowledge_retrieval_node(state: SalesState) -> SalesState:
             # 可选：添加默认提示
             state["metadata"] = state.get("metadata", {})
             state["metadata"]["knowledge_hint"] = "未找到匹配的产品信息，将使用通用话术回复"
-        
-        return state
-        
+
+        return strip_messages(state)
+
     except Exception as e:
         logger.error(f"[KB Node] 知识库检索节点异常: {e}")
         # 防御性兜底：任何错误都不中断流程
@@ -600,7 +718,7 @@ async def knowledge_retrieval_node(state: SalesState) -> SalesState:
         state["next_node"] = "sales_response"
         state["metadata"] = state.get("metadata", {})
         state["metadata"]["knowledge_fallback"] = True
-        return state
+        return strip_messages(state)
 
 
 async def knowledge_synthesis_node(state: SalesState) -> SalesState:
@@ -621,7 +739,7 @@ async def knowledge_synthesis_node(state: SalesState) -> SalesState:
         if not knowledge_results or not isinstance(knowledge_results, list):
             logger.warning("[KB Synthesis] 没有知识结果可整合")
             state["next_node"] = "sales_response"
-            return state
+            return strip_messages(state)
         
         # 准备知识上下文
         knowledge_context = "\n\n".join([
@@ -630,7 +748,7 @@ async def knowledge_synthesis_node(state: SalesState) -> SalesState:
         ])
         
         # 构建提示
-        synthesis_prompt = f"""你是一位专业的产品顾问。基于以下从知识库检索到的信息，回答客户的问题。
+        synthesis_prompt = f"""你是一位专业的丰田汽车销售顾问。基于以下从知识库检索到的信息，回答客户的问题。
 
 检索到的相关信息：
 {knowledge_context}
@@ -639,9 +757,10 @@ async def knowledge_synthesis_node(state: SalesState) -> SalesState:
 如果检索到的信息不足以回答问题，请诚实地告知客户你需要进一步确认。
 
 回答要求：
-1. 语言简洁专业
+1. 语言简洁专业，基于检索信息，不编造价格/政策
 2. 突出产品优势和价值
-3. 如有需要，可以引导客户进行下一步（如索取详细资料、安排演示等）"""
+3. 回复不超过 300 字
+4. 自然收尾，引导客户进行下一步（索取详细资料、预约试驾等）"""
 
         llm = ChatOpenAI(
             model=settings.default_model,
@@ -660,27 +779,39 @@ async def knowledge_synthesis_node(state: SalesState) -> SalesState:
                 pass
         
         messages = [
-            SystemMessage(content=synthesis_prompt),
-            HumanMessage(content=user_content)
+            SystemMessage(content=guard_system_prompt(synthesis_prompt)),
+            HumanMessage(content=guard_user_content(str(user_content)))
         ]
-        
+
         response = await llm.ainvoke(messages)
-        
+        answer = response.content if hasattr(response, "content") else str(response)
+
         # 保存到 metadata，供后续节点使用
         state["metadata"] = state.get("metadata", {})
-        state["metadata"]["knowledge_response"] = response.content
-        state["next_node"] = "sales_response"
-        
-        logger.info(f"[KB Synthesis] 知识整合完成，生成 {len(response.content)} 字符回复")
-        
-        return state
-        
+        state["metadata"]["knowledge_response"] = answer
+        # 性能修复：知识整合节点直接产出最终回复（避免下游再打一次 LLM）
+        state["sales_response"] = answer
+        state["suggested_actions"] = ["获取报价", "了解详情", "预约试驾"]
+        state["next_node"] = "sales_response"  # 下游节点检测到已有回复直接结束
+
+        logger.info(f"[KB Synthesis] 知识整合完成，生成 {len(answer)} 字符回复")
+
+        from langchain_core.messages import AIMessage
+
+        return {
+            "sales_response": answer,
+            "suggested_actions": ["获取报价", "了解详情", "预约试驾"],
+            "metadata": state["metadata"],
+            "messages": [AIMessage(content=answer)],
+            "next_node": "sales_response",
+        }
+
     except Exception as e:
         logger.error(f"[KB Synthesis] 知识整合失败: {e}")
         # 防御性兜底
         state["error"] = f"知识整合失败: {str(e)}"
         state["next_node"] = "sales_response"
-        return state
+        return strip_messages(state)
 
 
 # ═══════════════════════════════════════════════════════════════

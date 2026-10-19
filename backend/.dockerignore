@@ -1,0 +1,17 @@
+# 不要把机密/日志/输出产物打进镜像
+.env
+.env.*
+!.env.example
+app.log
+*.log
+output/
+data/vector_store/
+data/knowledge_base/
+.pytest_cache/
+__pycache__/
+**/__pycache__/
+*.pyc
+.venv/
+pylib/
+tests/
+.git/
