@@ -10,16 +10,17 @@ class ConnectionManager:
     def __init__(self):
         # session_id -> list of connected websockets
         self.active_connections: Dict[str, List[WebSocket]] = {}
-    
+
     async def connect(self, websocket: WebSocket, session_id: str):
         await websocket.accept()
         if session_id not in self.active_connections:
             self.active_connections[session_id] = []
         self.active_connections[session_id].append(websocket)
-        print(f"[WS-CONNECT] session={session_id} total={len(self.active_connections)} clients_here={len(self.active_connections[session_id])}", flush=True)
-    
+        logger.info("[WS-CONNECT] session=%s total=%s clients_here=%s",
+                    session_id, len(self.active_connections), len(self.active_connections[session_id]))
+
     def disconnect(self, websocket: WebSocket, session_id: str):
-        # Issue #15: safe remove with try/except for ValueError
+        # safe remove with try/except for ValueError
         if session_id in self.active_connections:
             try:
                 self.active_connections[session_id].remove(websocket)
@@ -27,7 +28,19 @@ class ConnectionManager:
                 pass  # already disconnected
             if not self.active_connections[session_id]:
                 del self.active_connections[session_id]
-    
+
+    async def _send_to_all(self, connections: List[WebSocket], session_id: str, event: dict) -> None:
+        """发送事件并清理发送失败的陈旧连接。"""
+        stale = []
+        for ws in connections:
+            try:
+                await ws.send_json(event)
+            except Exception as e:
+                stale.append(ws)
+                logger.warning("[WS] send failed: %s", e)
+        for ws in stale:
+            self.disconnect(ws, session_id)
+
     async def broadcast_to_session(self, session_id: str, message: dict):
         """Send message to all clients watching this session"""
         event = {
@@ -43,23 +56,13 @@ class ConnectionManager:
             (event.get("message") or {}).get("id"),
             len(connections),
         )
-        stale = []
-        for ws in connections:
-            try:
-                await ws.send_json(event)
-            except Exception as e:
-                stale.append(ws)
-                logger.warning(f"[WS] broadcast_to_session failed: {e}")
-        for ws in stale:
-            self.disconnect(ws, session_id)
-    
+        await self._send_to_all(connections, session_id, event)
+
     async def broadcast_event(self, event_type: str, data: dict):
-        """Broadcast to ALL connected clients (for session list updates)"""
-        for session_id, connections in self.active_connections.items():
-            for ws in connections:
-                try:
-                    await ws.send_json({"type": event_type, **data})
-                except Exception as e:
-                    logger.debug(f"[WS] broadcast_event failed for {session_id}: {e}")
+        """Broadcast to ALL connected clients (for session list updates)."""
+        # 快照遍历 + 失败清理（修复：不再遗留死连接）
+        for session_id, connections in list(self.active_connections.items()):
+            event = {"type": event_type, **data}
+            await self._send_to_all(list(connections), session_id, event)
 
 manager = ConnectionManager()

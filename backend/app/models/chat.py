@@ -96,11 +96,16 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=10000, description="用户消息")
     history: List[ChatMessage] = Field(
         default_factory=list,
-        description="历史消息上下文"
+        description="【已废弃】历史消息上下文：对话记忆由服务端 checkpoint 维护，请勿再传，否则会与 checkpoint 合并导致消息重复",
     )
     context: Optional[Dict[str, Any]] = Field(
         default=None,
         description="业务上下文（客户信息、产品信息等）"
+    )
+    input_image_url: Optional[str] = Field(
+        default=None,
+        max_length=2048,
+        description="用户上传的汽车图片 URL（多模态视觉分析）"
     )
     
     @field_validator('message')

@@ -46,10 +46,16 @@ def setup_logging() -> logging.Logger:
     
     logger.addHandler(console_handler)
     
-    # 文件处理器（生产环境建议开启）
+    # 文件处理器（生产环境开启，带轮转防止日志无限增长）
     if not settings.debug:
-        file_handler = logging.FileHandler("app.log", encoding="utf-8")
-        file_handler.setLevel(logging.WARNING)
+        from logging.handlers import RotatingFileHandler
+        file_handler = RotatingFileHandler(
+            "app.log",
+            encoding="utf-8",
+            maxBytes=10 * 1024 * 1024,  # 10 MB
+            backupCount=5,
+        )
+        file_handler.setLevel(logging.INFO)
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
     

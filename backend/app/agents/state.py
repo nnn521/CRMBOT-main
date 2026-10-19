@@ -115,6 +115,31 @@ class KnowledgeState(BaseModel):
     relevance_score: float = Field(default=0.0, description="相关度分数")
 
 
+def strip_messages(state: SalesState) -> SalesState:
+    """
+    从节点返回的状态中移除 messages 键。
+
+    messages 通道使用 add_messages 合并器：节点返回完整状态时会把它整体
+    再次追加到 checkpoint 消息上，造成每条消息在每个节点重复一遍。
+    非终态节点必须用本函数剥离 messages 后再返回。
+    """
+    state.pop("messages", None)
+    return state
+
+
+def state_update_with_reply(state: SalesState, reply: str) -> Dict[str, Any]:
+    """
+    终态节点统一输出：剥离全量 messages，仅追加本条回复为一条 AIMessage，
+    同时写入 sales_response。其余键原样携带（与 checkpoint 合并）。
+    """
+    from langchain_core.messages import AIMessage
+
+    update = {k: v for k, v in state.items() if k != "messages"}
+    update["sales_response"] = reply
+    update["messages"] = [AIMessage(content=reply)]
+    return update
+
+
 def create_initial_state(
     session_id: str,
     user_message: str,
@@ -124,25 +149,32 @@ def create_initial_state(
 ) -> SalesState:
     """
     创建初始状态（多模态版）
-    
+
+    注意（历史修复）：
+    - chat API 不再传 history：跨轮对话由 LangGraph checkpoint 维护。
+      传入 history 会经 add_messages 与 checkpoint 合并，导致消息重复膨胀，
+      因此该参数仅用于无 checkpoint 的直接调用（如单元测试）。
+    - context 仅在显式提供时才包含在输入中；不提供时保留 checkpoint
+      里积累的多轮上下文（客户名、车型等）。
+
     Args:
         session_id: 会话ID
         user_message: 用户当前消息
-        context: 业务上下文
-        history: 历史消息列表
+        context: 业务上下文（可选；不传则沿用 checkpoint 上下文）
+        history: 【已废弃】历史消息列表，仅用于无 checkpoint 的直接调用
         input_image_url: 用户上传的汽车图片 URL（多模态新增）
-    
+
     Returns:
         初始化后的 SalesState
     """
-    messages = history or []
+    messages = list(history) if history else []
     messages.append({"role": "user", "content": user_message})
-    
-    return SalesState(
+
+    state: SalesState = SalesState(
         messages=messages,
         session_id=session_id,
         intent_analysis=None,
-        context=context or {},
+        context=context if context is not None else {},
         knowledge_results=[],
         images=[],
         generated_documents=[],
@@ -156,3 +188,9 @@ def create_initial_state(
         generated_media=[]
         # 注意：document_params 不重置，由 checkpoint 保留以支持多轮文档参数补充
     )
+
+    # context 为 None 时从输入中移除该键，让 checkpoint 中积累的上下文延续。
+    if context is None:
+        state.pop("context", None)
+
+    return state

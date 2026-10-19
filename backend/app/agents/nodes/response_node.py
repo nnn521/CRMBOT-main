@@ -24,7 +24,8 @@ from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.agents.state import SalesState
+from app.core.prompts import guard_system_prompt, guard_user_content
+from app.agents.state import SalesState, state_update_with_reply
 from app.models.chat import UserIntent
 
 logger = get_logger("response_node")
@@ -408,13 +409,13 @@ async def sales_response_node(state: SalesState) -> SalesState:
     """
     session_id = state.get("session_id", "unknown")
     logger.info(f"[Session: {session_id}] 生成销售回复")
-    
-    # 如果已有回复，直接返回（可能由前面节点生成）
+
+    # 如果已有回复，直接返回（可能由前面节点生成，如知识整合节点）
     existing_reply = state.get("sales_response")
     if existing_reply and isinstance(existing_reply, str) and len(existing_reply.strip()) > 0:
         logger.debug("[Response] 使用已有回复")
         state["next_node"] = "end"
-        return state
+        return {k: v for k, v in state.items() if k != "messages"}
     
     # 获取意图信息
     intent_analysis = state.get("intent_analysis")
@@ -483,7 +484,7 @@ async def sales_response_node(state: SalesState) -> SalesState:
 {history_str}
 
 【当前用户消息】
-{user_message}
+{guard_user_content(user_message)}
 
 【识别意图】{intent.value if hasattr(intent, 'value') else str(intent)}
 
@@ -493,7 +494,7 @@ async def sales_response_node(state: SalesState) -> SalesState:
 请基于对话历史理解上下文，生成简洁、专业、连贯的销售回复："""
 
         response = await llm.ainvoke([
-            SystemMessage(content=prompt),
+            SystemMessage(content=guard_system_prompt(prompt)),
             HumanMessage(content="请生成回复")
         ])
         
@@ -524,16 +525,16 @@ async def sales_response_node(state: SalesState) -> SalesState:
         
         state["sales_response"] = reply
         state["suggested_actions"] = suggested_actions
-        
+
         logger.info(f"[Response] 回复生成完成，长度: {len(reply)}")
-        
+
     except Exception as e:
         logger.error(f"[Response] 生成回复失败: {e}")
         state["sales_response"] = _get_default_reply(intent)
         state["suggested_actions"] = ["继续咨询", "了解产品信息"]
-    
+
     state["next_node"] = "end"
-    return state
+    return state_update_with_reply(state, state["sales_response"])
 
 
 async def sales_negotiation_node(state: SalesState) -> SalesState:
@@ -555,7 +556,7 @@ async def sales_negotiation_node(state: SalesState) -> SalesState:
     existing_reply = state.get("sales_response")
     if existing_reply and isinstance(existing_reply, str) and len(existing_reply.strip()) > 0:
         state["next_node"] = "end"
-        return state
+        return {k: v for k, v in state.items() if k != "messages"}
 
     # 获取用户消息
     user_message = ""
@@ -582,9 +583,9 @@ async def sales_negotiation_node(state: SalesState) -> SalesState:
             temperature=0.7,
         )
 
-        system_prompt = _build_negotiation_system_prompt()
+        system_prompt = guard_system_prompt(_build_negotiation_system_prompt())
 
-        user_prompt = f"""客户消息：{user_message}
+        user_prompt = f"""客户消息：{guard_user_content(user_message)}
 
 上下文信息：
 - 客户关注车型：{context.get('car_model', '未指定')}
@@ -605,7 +606,7 @@ async def sales_negotiation_node(state: SalesState) -> SalesState:
             state["suggested_actions"] = ["预约到店详谈", "申请优惠", "了解金融方案"]
             state["next_node"] = "end"
             logger.info(f"[Negotiation] LLM 回复生成完成，长度: {len(reply)}")
-            return state
+            return state_update_with_reply(state, state["sales_response"])
 
     except Exception as e:
         logger.warning(f"[Negotiation] LLM 调用失败，回退到 YAML 模板: {e}")
@@ -623,7 +624,7 @@ async def sales_negotiation_node(state: SalesState) -> SalesState:
                     state["suggested_actions"] = scenario.get("suggested_actions", ["预约到店详谈", "了解更多优惠"])
                     state["next_node"] = "end"
                     logger.info(f"[Negotiation] YAML 模板匹配: {scenario.get('name', 'unknown')}")
-                    return state
+                    return state_update_with_reply(state, reply)
     except Exception as e:
         logger.warning(f"[Negotiation] YAML 模板匹配失败: {e}")
 
@@ -640,7 +641,7 @@ async def sales_negotiation_node(state: SalesState) -> SalesState:
     state["suggested_actions"] = ["预约到店详谈", "了解金融方案", "获取报价"]
     state["next_node"] = "end"
     logger.info("[Negotiation] 使用硬编码默认回复")
-    return state
+    return state_update_with_reply(state, state["sales_response"])
 
 
 async def complaint_handler_node(state: SalesState) -> SalesState:
@@ -662,7 +663,7 @@ async def complaint_handler_node(state: SalesState) -> SalesState:
     existing_reply = state.get("sales_response")
     if existing_reply and isinstance(existing_reply, str) and len(existing_reply.strip()) > 0:
         state["next_node"] = "end"
-        return state
+        return {k: v for k, v in state.items() if k != "messages"}
 
     # 获取用户消息
     user_message = ""
@@ -704,9 +705,9 @@ async def complaint_handler_node(state: SalesState) -> SalesState:
             temperature=0.7,
         )
 
-        system_prompt = _build_complaint_system_prompt()
+        system_prompt = guard_system_prompt(_build_complaint_system_prompt())
 
-        user_prompt = f"""客户投诉消息：{user_message}
+        user_prompt = f"""客户投诉消息：{guard_user_content(user_message)}
 
 上下文信息：
 - 客户名称：{context.get('customer_name', '未提及')}
@@ -727,7 +728,7 @@ async def complaint_handler_node(state: SalesState) -> SalesState:
             state["suggested_actions"] = ["预约售后检测", "投诉升级处理", "转接售后经理"]
             state["next_node"] = "end"
             logger.info(f"[Complaint] LLM 回复生成完成，长度: {len(reply)}")
-            return state
+            return state_update_with_reply(state, state["sales_response"])
         logger.warning("[Complaint] LLM 回复缺少投诉处理闭环，回退到 YAML 模板")
 
     except Exception as e:
@@ -745,7 +746,7 @@ async def complaint_handler_node(state: SalesState) -> SalesState:
                     state["suggested_actions"] = scenario.get("suggested_actions", ["反馈详细信息", "转接人工客服"])
                     state["next_node"] = "end"
                     logger.info(f"[Complaint] YAML 模板匹配: {scenario.get('name', 'unknown')}")
-                    return state
+                    return state_update_with_reply(state, reply)
     except Exception as e:
         logger.warning(f"[Complaint] YAML 模板匹配失败: {e}")
 
@@ -762,8 +763,8 @@ async def complaint_handler_node(state: SalesState) -> SalesState:
     state["suggested_actions"] = ["反馈详细信息", "转接人工客服", "留下联系方式"]
     state["next_node"] = "end"
     logger.info("[Complaint] 使用硬编码默认回复")
-    return state
+    return state_update_with_reply(state, state["sales_response"])
 
 
 # 兼容性导出
-clarify_document_type_node = sales_response_node
+# clarify_document_type_node 已移除（旧节点别名，无调用方）

@@ -10,14 +10,16 @@ from app.agents.nodes.knowledge_node import (
 )
 from app.agents.nodes.document_nodes import (
     extract_document_params_node,
-    request_missing_params_node,
     generate_document_node,
 )
 from app.agents.nodes.response_node import (
     sales_response_node,
     sales_negotiation_node,
     complaint_handler_node,
-    clarify_document_type_node,
+)
+from app.agents.nodes.multimodal_node import (
+    vision_analysis_node,
+    media_generation_node,
 )
 
 __all__ = [
@@ -26,10 +28,10 @@ __all__ = [
     "knowledge_synthesis_node",
     "KnowledgeBaseService",
     "extract_document_params_node",
-    "request_missing_params_node",
     "generate_document_node",
     "sales_response_node",
     "sales_negotiation_node",
     "complaint_handler_node",
-    "clarify_document_type_node",
+    "vision_analysis_node",
+    "media_generation_node",
 ]

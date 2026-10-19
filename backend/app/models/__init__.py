@@ -28,7 +28,6 @@ from app.models.user import User
 from app.models.conversation import Conversation
 from app.models.config import SystemConfig
 from app.models.chat_session_state import ChatSessionState
-from app.models.session import Session
 from app.models.account import AuthAccount
 from app.models.engagement import Lead, SatisfactionFeedback
 
@@ -41,6 +40,6 @@ __all__ = [
     "AnalysisParams", "PresentationParams",
     # SQLAlchemy
     "User", "Conversation", "SystemConfig", "ChatSessionState",
-    "Session", "AuthAccount",
+    "AuthAccount",
     "Lead", "SatisfactionFeedback",
 ]

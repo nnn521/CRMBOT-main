@@ -9,7 +9,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Text, DateTime, JSON, func
+from sqlalchemy import String, Text, DateTime, JSON, Index, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.db import Base
@@ -19,6 +19,10 @@ from app.models.tenant import TenantMixin
 class Conversation(TenantMixin, Base):
     """对话记录表"""
     __tablename__ = "conversations"
+    __table_args__ = (
+        # 会话列表/最新消息查询走 (session_id, created_at) 复合索引
+        Index("ix_conversations_session_created", "session_id", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(

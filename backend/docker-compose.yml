@@ -15,9 +15,10 @@ services:
       - DEBUG=false
       - HOST=0.0.0.0
       - PORT=8000
+      # 生产安全基线：必须显式声明 production，否则 FAISS 危险反序列化默认关闭
+      - ENVIRONMENT=${ENVIRONMENT:-production}
       - DATABASE_URL=postgresql://crmbot:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/crmbot
       - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required}
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY:?INTERNAL_API_KEY is required}
       - BOOTSTRAP_ADMIN_USERNAME=${BOOTSTRAP_ADMIN_USERNAME:-}
       - BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -25,17 +26,27 @@ services:
       - DEFAULT_MODEL=${DEFAULT_MODEL:-deepseek-chat}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-bge-m3}
       - OLLAMA_BASE_URL=http://ollama:11434
+      # 多模态（可选）
+      - ZHIPU_API_KEY=${ZHIPU_API_KEY:-}
+      # Hermes 内部助手（可选）
+      - HERMES_API_URL=${HERMES_API_URL:-http://host.docker.internal:8642/v1}
+      - HERMES_API_KEY=${HERMES_API_KEY:-}
+      - CORS_ORIGINS=${CORS_ORIGINS:-["http://localhost:5173"]}
+      - MAX_ITERATIONS=${MAX_ITERATIONS:-10}
+      - AUTH_RATE_LIMIT=${AUTH_RATE_LIMIT:-10}
+      - CHAT_RATE_LIMIT=${CHAT_RATE_LIMIT:-30}
+      - REPORT_RATE_LIMIT=${REPORT_RATE_LIMIT:-10}
+      - RATE_LIMIT_WINDOW_SECONDS=${RATE_LIMIT_WINDOW_SECONDS:-60}
     volumes:
       - ./data:/app/data           # 知识库 + 模板 + 图片
       - ./output:/app/output       # 生成文档输出
-      - ./.env:/app/.env:ro        # 环境变量
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - crmbot-net
 
-  # ========== PostgreSQL 数据库 ========== 
+  # ========== PostgreSQL 数据库 ==========
   postgres:
     image: postgres:16-alpine
     container_name: crmbot-postgres
@@ -55,12 +66,18 @@ services:
       - crmbot-net
 
   # ========== Ollama 本地模型服务 ==========
+  # 注意：首次使用需手动拉取嵌入模型：docker compose exec ollama ollama pull bge-m3
   ollama:
     image: ollama/ollama:latest
     container_name: crmbot-ollama
     restart: unless-stopped
     volumes:
       - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
     networks:
       - crmbot-net
 

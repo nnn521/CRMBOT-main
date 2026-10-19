@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import get_db
 from app.models.engagement import Lead, SatisfactionFeedback
 from app.services.auth import get_current_user
+from app.services.rate_limiter import enforce_rate_limit
+from app.api.v1.chat import _assert_session_owner
 
 
 router = APIRouter(tags=["customer engagement"])
@@ -39,6 +41,16 @@ def _require_user(current_user: Optional[dict]) -> dict:
     return current_user
 
 
+async def _guard_engagement(db: AsyncSession, current_user: dict, session_id: str) -> None:
+    """线索/反馈只能提交到自己拥有的会话；并按用户限流防止刷单。"""
+    await _assert_session_owner(db, session_id, current_user)
+    await enforce_rate_limit(
+        f"engagement:{current_user['user_id']}",
+        limit=10,
+        window_seconds=60,
+    )
+
+
 @router.post("/leads", status_code=status.HTTP_201_CREATED)
 async def create_lead(
     body: LeadCreate,
@@ -46,6 +58,7 @@ async def create_lead(
     current_user: Optional[dict] = Depends(get_current_user),
 ):
     user = _require_user(current_user)
+    await _guard_engagement(db, user, body.session_id)
     lead = Lead(user_id=user["user_id"], **body.model_dump())
     db.add(lead)
     await db.flush()
@@ -59,6 +72,7 @@ async def create_feedback(
     current_user: Optional[dict] = Depends(get_current_user),
 ):
     user = _require_user(current_user)
+    await _guard_engagement(db, user, body.session_id)
     feedback = SatisfactionFeedback(user_id=user["user_id"], **body.model_dump())
     db.add(feedback)
     await db.flush()

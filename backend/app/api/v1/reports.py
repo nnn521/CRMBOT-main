@@ -4,13 +4,14 @@
 提供销售数据驾驶舱所需的聚合数据，以及 LLM AI 解读功能。
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select, func, distinct, case, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.prompts import guard_system_prompt, guard_user_content
 from app.models.conversation import Conversation
 from app.models.chat_session_state import ChatSessionState
 from app.models.db import get_db
@@ -137,7 +138,7 @@ async def get_dashboard(
 async def get_deals(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
-    limit: int = 10,
+    limit: int = Query(10, ge=1, le=200),
 ):
     """
     返回最近成交的会话列表。
@@ -227,7 +228,7 @@ async def analyze_report(
 
     try:
         from langchain_openai import ChatOpenAI
-        from langchain.schema import SystemMessage, HumanMessage
+        from langchain_core.messages import SystemMessage, HumanMessage
 
         llm = ChatOpenAI(
             model=settings.default_model,
@@ -236,7 +237,7 @@ async def analyze_report(
             temperature=0.7,
         )
 
-        system_prompt = """你是一位资深汽车销售数据分析师。
+        system_prompt = guard_system_prompt("""你是一位资深汽车销售数据分析师。
 请根据以下销售看板数据，生成一段简洁的业务分析报告。
 
 分析要点：
@@ -248,9 +249,9 @@ async def analyze_report(
 要求：
 - 语言简洁专业，使用中文
 - 控制在300字以内
-- 不要重复原始数据，重点在于分析和建议"""
+- 不要重复原始数据，重点在于分析和建议""")
 
-        user_prompt = f"以下是当前销售看板数据：\n\n{req.data}\n\n请生成分析报告："
+        user_prompt = guard_user_content(f"以下是当前销售看板数据：\n\n{req.data}\n\n请生成分析报告：")
 
         response = await llm.ainvoke([
             SystemMessage(content=system_prompt),
