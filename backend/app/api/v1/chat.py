@@ -8,12 +8,13 @@ import time
 from datetime import datetime
 from typing import Optional
 from uuid import uuid4
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from fastapi.responses import JSONResponse
 from sqlalchemy import delete, select, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from app.agents.graphs import run_sales_agent, clear_session_checkpoint
 from app.api.deps import get_current_session
@@ -27,6 +28,8 @@ from app.services.rate_limiter import enforce_rate_limit
 from app.models.chat import (
     ChatRequest,
     ChatResponse,
+    ChatAnswerInfo,
+    CitationInfo,
     ChatMessage,
     DocumentInfo,
     DocumentType,
@@ -116,6 +119,63 @@ def _find_car_images(user_message: str, context: dict, intent) -> list[str]:
     )
 
 
+def _validated_answer_info(raw: dict) -> dict:
+    """Read only public top-level fields; never copy context/opaque metadata."""
+    result = {}
+    for name in ChatAnswerInfo.model_fields:
+        if name not in raw or raw[name] is None:
+            continue
+        value = raw[name]
+        if name == "citations":
+            if not isinstance(value, list):
+                continue
+            citations = []
+            for item in value:
+                try:
+                    citation = CitationInfo.model_validate(item)
+                    citations.append(citation.model_dump(mode="json"))
+                except ValidationError:
+                    logger.warning("Dropped invalid citation from public chat payload")
+            result[name] = citations
+            continue
+        try:
+            result.update(ChatAnswerInfo.model_validate({name: value}).model_dump(
+                mode="json", exclude_none=True
+            ))
+        except ValidationError:
+            logger.warning("Dropped invalid answer field: %s", name)
+    return result
+
+
+def _history_message_payload(message: Conversation) -> dict:
+    """Restore the same controlled attachments/answer fields used by live messages."""
+    metadata = message.metadata_json if isinstance(message.metadata_json, dict) else {}
+    documents = []
+    for raw in metadata.get("documents", []) or []:
+        if not isinstance(raw, dict):
+            continue
+        filename = raw.get("file_name", raw.get("filename"))
+        if not isinstance(filename, str) or not filename:
+            continue
+        documents.append({
+            "file_name": filename,
+            "file_path": f"/api/v1/documents/{quote(filename, safe='')}",
+            "doc_type": raw.get("doc_type", raw.get("type", "unknown")),
+            "file_size": raw.get("file_size", raw.get("size", 0)),
+        })
+    images = metadata.get("images")
+    payload = _ws_message_payload(
+        message_id=str(message.id), session_id=message.session_id,
+        role=message.role, content=message.content, timestamp=message.created_at,
+        documents=documents,
+        images=[image for image in images if isinstance(image, str)] if isinstance(images, list) else [],
+        intent=message.intent,
+        answer_info=metadata if message.role == "assistant" else None,
+    )
+    payload["created_at"] = message.created_at.isoformat() if message.created_at else None
+    return payload
+
+
 def _ws_message_payload(
     *,
     message_id: str,
@@ -126,6 +186,7 @@ def _ws_message_payload(
     documents: Optional[list] = None,
     images: Optional[list[str]] = None,
     intent: Optional[str] = None,
+    answer_info: Optional[dict] = None,
 ) -> dict:
     """Build the canonical message shape shared by REST history and WebSocket."""
     return {
@@ -137,6 +198,7 @@ def _ws_message_payload(
         "documents": documents or [],
         "images": images or [],
         "intent": intent,
+        **_validated_answer_info(answer_info or {}),
     }
 
 
@@ -304,7 +366,10 @@ async def chat(
         final_state = await run_sales_agent(
             session_id=actual_session_id,
             message=request.message,
-            context=request.context,
+            context={
+                key: value for key, value in (request.context or {}).items()
+                if key not in ChatAnswerInfo.model_fields
+            } or None,
             history=None,
             input_image_url=request.input_image_url,
         )
@@ -345,7 +410,9 @@ async def chat(
             intent=intent_value,
         )
 
+        answer_info = _validated_answer_info(final_state)
         response = ChatResponse(
+            **answer_info,
             session_id=actual_session_id,
             reply=final_state.get("sales_response", "抱歉，我没有理解您的问题。"),
             intent=intent_value,
@@ -386,7 +453,9 @@ async def chat(
                         "documents": [
                             {"file_name": document.file_name, "doc_type": document.doc_type.value}
                             for document in docs
-                        ]
+                        ],
+                        "images": response.images,
+                        **answer_info,
                     },
                 )
                 db.add(user_msg)
@@ -426,6 +495,7 @@ async def chat(
                 documents=[doc.model_dump(by_alias=True) for doc in docs],
                 images=images,
                 intent=intent_str,
+                answer_info=answer_info,
             ),
         }
         
@@ -635,15 +705,7 @@ async def get_chat_session_messages(
 
     return {
         "session_id": session_id,
-        "messages": [
-            {
-                "id": m.id,
-                "role": m.role,
-                "content": m.content,
-                "created_at": m.created_at.isoformat() if m.created_at else None,
-            }
-            for m in messages
-        ],
+        "messages": [_history_message_payload(m) for m in messages],
         "total": len(messages),
     }
 
@@ -744,10 +806,7 @@ async def get_chat_history(
     messages = result.scalars().all()
     return {
         "session_id": session_id,
-        "messages": [
-            {"id": str(m.id), "role": m.role, "content": m.content, "created_at": m.created_at}
-            for m in messages
-        ],
+        "messages": [_history_message_payload(m) for m in messages],
         "total": len(messages),
     }
 

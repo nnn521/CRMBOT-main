@@ -1,4 +1,25 @@
-export interface ChatMessage {
+export interface CitationInfo {
+  citation_id: string
+  span_id: string
+  source_id: string
+  document_version: string
+  title: string
+  locator: Record<string, unknown>
+  quote: string
+  /** Authenticated knowledge-detail API; never a server filesystem path. */
+  url: string
+}
+
+export interface ChatAnswerInfo {
+  citations?: CitationInfo[] | null
+  knowledge_release_id?: string | null
+  answer_status?: 'answered' | 'partial' | 'clarification' | 'unavailable' | null
+  data_as_of?: string | null
+  assumptions?: string[] | null
+  limitations?: string[] | null
+}
+
+export interface ChatMessage extends ChatAnswerInfo {
   id: string
   role: 'user' | 'assistant'
   content: string
@@ -23,27 +44,39 @@ export interface DocumentInfo {
   file_size: number
 }
 
-export interface ChatResponse {
+/** 后端文档序列化形态（REST 别名 / WS 别名混合，均为可选字段） */
+export interface ApiDocumentInfo {
+  file_name?: string
+  filename?: string
+  file_path?: string
+  path?: string
+  doc_type?: string
+  type?: string
+  file_size?: number
+  size?: number
+}
+
+export interface ChatResponse extends ChatAnswerInfo {
   session_id: string
   message_id?: string
   user_message_id?: string
-  status: 'completed' | 'waiting_human'
+  status: string
   reply: string
   intent: string
-  documents: DocumentInfo[]
+  documents: ApiDocumentInfo[]
   images: string[]
   suggested_actions: string[]
   metadata: Record<string, unknown>
-  response_time_ms: number
+  response_time_ms: number | null
 }
 
-export interface WebSocketMessagePayload {
+export interface WebSocketMessagePayload extends ChatAnswerInfo {
   id: string
   session_id: string
-  role: 'user' | 'assistant'
+  role: string
   content: string
   timestamp: string
-  documents?: DocumentInfo[]
+  documents?: ApiDocumentInfo[]
   images?: string[]
   intent?: string
 }

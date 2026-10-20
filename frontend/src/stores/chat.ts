@@ -1,5 +1,37 @@
 import type { ChatMessage, DocumentInfo, Session, HighIntentAlert } from '@/types'
+import { currentSessionId } from '@/lib/api'
 import { create } from 'zustand'
+
+const DEDUP_MAX = 500
+const DEDUP_KEEP = 200
+
+function cappedSeen(seen: Set<string>): Set<string> {
+  if (seen.size <= DEDUP_MAX) return seen
+  return new Set([...seen].slice(-DEDUP_KEEP))
+}
+
+/** Same server ID is one bubble; late HTTP/history fills fields missing from WS. */
+function mergeMessage(existing: ChatMessage, incoming: ChatMessage): ChatMessage {
+  const merged = { ...existing }
+  for (const key of Object.keys(incoming) as (keyof ChatMessage)[]) {
+    const value = incoming[key]
+    const previous = existing[key]
+    if (value == null) continue
+    if (previous == null || previous === '' || (Array.isArray(previous) && previous.length === 0) || key === 'status') {
+      Object.assign(merged, { [key]: value })
+    }
+  }
+  return merged
+}
+
+function mergeMessageLists(current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
+  const byId = new Map(current.map((message) => [message.id, message]))
+  for (const message of incoming) {
+    const existing = byId.get(message.id)
+    byId.set(message.id, existing ? mergeMessage(existing, message) : message)
+  }
+  return [...byId.values()].sort((a, b) => a.timestamp - b.timestamp)
+}
 
 interface ChatStore {
   messages: ChatMessage[]
@@ -15,7 +47,7 @@ interface ChatStore {
   addDedupKey: (key: string) => void
   hasDedupKey: (key: string) => boolean
   addMessage: (msg: ChatMessage) => void
-  updateMessageStatus: (id: string, status: ChatMessage['status']) => void
+  updateMessageStatus: (id: string, status: ChatMessage['status'], serverId?: string) => void
   mergeMessages: (msgs: ChatMessage[]) => void
   appendSessionMessage: (sessionId: string, msg: ChatMessage) => void
   setSessionMessages: (sessionId: string, msgs: ChatMessage[]) => void
@@ -26,6 +58,7 @@ interface ChatStore {
   setSessions: (sessions: Session[]) => void
   addSession: (session: Session) => void
   setSessionId: (id: string) => void
+  refreshSessionId: () => void
   setMessages: (msgs: ChatMessage[]) => void
   setHandoverMode: (sessionId: string, mode: 'ai' | 'human') => void
   addHighIntentAlert: (alert: HighIntentAlert) => void
@@ -36,21 +69,9 @@ function generateId(): string {
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 }
 
-function getSessionId(): string {
-  // 基于用户名生成稳定的 sessionId，保证刷新后 WS 频道不变
-  try {
-    const userStr = localStorage.getItem('crmbot_user')
-    if (userStr) {
-      const user = JSON.parse(userStr)
-      if (user.username) {
-        return `session_${user.username}`
-      }
-    }
-  } catch { /* fall through */ }
-  // 未登录时 fallback 随机值
-  const arr = new Uint32Array(2)
-  crypto.getRandomValues(arr)
-  return `session_${arr[0].toString(36)}_${arr[1].toString(36)}`
+/** 登录/登出后调用：按当前 localStorage 用户重新推导会话 ID */
+export function getSessionId(): string {
+  return currentSessionId()
 }
 
 export const useChatStore = create<ChatStore>((set) => ({
@@ -67,42 +88,37 @@ export const useChatStore = create<ChatStore>((set) => ({
 
   addMessage: (msg) =>
     set((state) => {
-      if (state.seenMessageIds.has(msg.id)) return state
-      const seen = new Set(state.seenMessageIds)
-      seen.add(msg.id)
-      return { messages: [...state.messages, msg], seenMessageIds: seen }
+      const seen = cappedSeen(new Set(state.seenMessageIds).add(msg.id))
+      return { messages: mergeMessageLists(state.messages, [msg]), seenMessageIds: seen }
     }),
 
-  updateMessageStatus: (id, status) =>
-    set((state) => ({
-      messages: state.messages.map((msg) => msg.id === id ? { ...msg, status } : msg),
-    })),
+  updateMessageStatus: (id, status, serverId) =>
+    set((state) => {
+      const messages = state.messages.map((msg) => msg.id === id ? { ...msg, id: serverId || id, status } : msg)
+      const seen = new Set(state.seenMessageIds)
+      if (serverId) {
+        seen.delete(id)
+        seen.add(serverId)
+      }
+      return { messages: mergeMessageLists([], messages), seenMessageIds: cappedSeen(seen) }
+    }),
 
   mergeMessages: (msgs) =>
     set((state) => {
       const seen = new Set(state.seenMessageIds)
-      const merged = [...state.messages]
-      for (const msg of msgs) {
-        if (!seen.has(msg.id)) {
-          seen.add(msg.id)
-          merged.push(msg)
-        }
-      }
-      merged.sort((a, b) => a.timestamp - b.timestamp)
-      return { messages: merged, seenMessageIds: seen }
+      msgs.forEach((msg) => seen.add(msg.id))
+      return { messages: mergeMessageLists(state.messages, msgs), seenMessageIds: cappedSeen(seen) }
     }),
 
   appendSessionMessage: (sessionId, msg) =>
     set((state) => {
-      if (state.seenMessageIds.has(msg.id)) return state
-      const seen = new Set(state.seenMessageIds)
-      seen.add(msg.id)
+      const seen = cappedSeen(new Set(state.seenMessageIds).add(msg.id))
       const current = state.sessionMessages[sessionId] || []
       return {
         seenMessageIds: seen,
         sessionMessages: {
           ...state.sessionMessages,
-          [sessionId]: [...current, msg].sort((a, b) => a.timestamp - b.timestamp),
+          [sessionId]: mergeMessageLists(current, [msg]),
         },
       }
     }),
@@ -112,8 +128,11 @@ export const useChatStore = create<ChatStore>((set) => ({
       const seen = new Set(state.seenMessageIds)
       msgs.forEach((msg) => seen.add(msg.id))
       return {
-        seenMessageIds: seen,
-        sessionMessages: { ...state.sessionMessages, [sessionId]: msgs },
+        seenMessageIds: cappedSeen(seen),
+        sessionMessages: {
+          ...state.sessionMessages,
+          [sessionId]: mergeMessageLists(state.sessionMessages[sessionId] || [], msgs),
+        },
       }
     }),
 
@@ -129,7 +148,8 @@ export const useChatStore = create<ChatStore>((set) => ({
 
   setLoading: (loading) => set({ isLoading: loading }),
 
-  clearMessages: () => set({ messages: [], attachedDocs: {}, attachedImages: {}, seenMessageIds: new Set() }),
+  clearMessages: () =>
+    set({ messages: [], attachedDocs: {}, attachedImages: {}, seenMessageIds: new Set() }),
 
   setSessions: (sessions) => {
     const modes: Record<string, 'ai' | 'human'> = {}
@@ -147,11 +167,14 @@ export const useChatStore = create<ChatStore>((set) => ({
 
   setSessionId: (id) => set({ sessionId: id }),
 
-  setMessages: (msgs) => set((state) => {
-    const seen = new Set(state.seenMessageIds)
-    msgs.forEach((msg) => seen.add(msg.id))
-    return { messages: msgs, seenMessageIds: seen }
-  }),
+  refreshSessionId: () => set({ sessionId: getSessionId() }),
+
+  setMessages: (msgs) =>
+    set((state) => {
+      const seen = new Set(state.seenMessageIds)
+      msgs.forEach((msg) => seen.add(msg.id))
+      return { messages: mergeMessageLists(state.messages, msgs), seenMessageIds: cappedSeen(seen) }
+    }),
 
   setHandoverMode: (sessionId, mode) =>
     set((state) => ({
@@ -170,15 +193,9 @@ export const useChatStore = create<ChatStore>((set) => ({
     })),
 
   addDedupKey: (key) =>
-    set((state) => {
-      const next = new Set(state.seenMessageIds)
-      next.add(key)
-      if (next.size > 500) {
-        const arr = [...next]
-        return { seenMessageIds: new Set(arr.slice(-200)) }
-      }
-      return { seenMessageIds: next }
-    }),
+    set((state) => ({
+      seenMessageIds: cappedSeen(new Set(state.seenMessageIds).add(key)),
+    })),
   hasDedupKey: (key: string): boolean => useChatStore.getState().seenMessageIds.has(key),
 }))
 

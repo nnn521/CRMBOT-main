@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { MessageSquare } from 'lucide-react'
+import { useChatStore } from '@/stores/chat'
+import { apiFetch } from '@/lib/api'
 
 interface LoginResponse {
   access_token: string
@@ -22,24 +24,18 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      const res = await fetch('/api/v1/auth/login', {
+      const data = await apiFetch<LoginResponse>('/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
       })
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error((data as any).detail || '登录失败')
-      }
-
-      const data: LoginResponse = await res.json()
-      localStorage.setItem('crmbot_token', data.access_token)
+      // JWT 由后端 httpOnly Cookie 下发；本地只保留用户展示信息
       localStorage.setItem('crmbot_user', JSON.stringify(data.user))
+      useChatStore.getState().refreshSessionId()
 
       navigate('/', { replace: true })
-    } catch (e: any) {
-      setError(e.message || '登录失败，请重试')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '登录失败，请重试')
     } finally {
       setLoading(false)
     }
@@ -100,10 +96,6 @@ export default function LoginPage() {
             {loading ? '登录中...' : '登录'}
           </button>
         </form>
-
-        <p className="mt-4 text-center text-xs text-neutral-400">
-          默认管理员: admin / admin123
-        </p>
       </div>
     </div>
   )

@@ -8,7 +8,7 @@
 
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -84,6 +84,34 @@ class Settings(BaseSettings):
         description="向量数据库存储路径"
     )
     
+    # RAG v2：独立开关/连接，不回退到业务数据库或现有模型配置
+    rag_v2_enabled: bool = False
+    knowledge_database_url: Optional[str] = None
+    knowledge_embedding_model: str = "bge-m3"
+    knowledge_embedding_revision: str = ""  # 必须配置 Ollama /api/tags 的完整 digest
+    knowledge_embedding_dimension: int = Field(default=1024, ge=1, le=16000)
+    knowledge_ollama_base_url: str = "http://localhost:11434"
+    knowledge_http_timeout_seconds: float = Field(default=10, gt=0, le=120)
+    knowledge_database_timeout_seconds: int = Field(default=5, ge=1, le=60)
+    knowledge_upload_max_bytes: int = Field(default=262144, ge=1, le=2097152)
+    knowledge_max_build_chunks: int = Field(default=2000, ge=1, le=10000)
+    # 可选本地 TEI cross-encoder；不安装/启动模型，默认完全不调用
+    knowledge_rerank_enabled: bool = False
+    knowledge_rerank_base_url: str = "http://127.0.0.1:8081"
+    knowledge_rerank_model: str = ""  # 必须匹配 TEI /info.model_id
+    knowledge_rerank_timeout_seconds: float = Field(default=0.3, gt=0, le=0.3)
+    knowledge_rerank_min_candidates: int = Field(default=4, ge=2, le=20)
+    knowledge_rerank_max_relative_gap: float = Field(default=0.15, ge=0, le=1)
+    knowledge_api_key: Optional[str] = None
+    knowledge_api_base_url: str = "https://api.deepseek.com"
+    knowledge_answer_model: str = "deepseek-chat"
+    knowledge_budget_cny: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    knowledge_input_per_million_cny: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    knowledge_output_per_million_cny: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    knowledge_budget_path: str = str(_BACKEND_DIR / "data" / "knowledge_model_budget.sqlite3")
+    # answered: 单次结构化综合回答（仍需人工评测）；source_quotes_only: 完整原文摘录
+    knowledge_answer_mode: Literal["source_quotes_only", "synthesized"] = "source_quotes_only"
+
     # 文档生成配置
     output_dir: str = Field(
         default=str(_BACKEND_DIR / "output"),

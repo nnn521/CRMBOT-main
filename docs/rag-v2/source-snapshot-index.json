@@ -1,0 +1,547 @@
+{
+  "schema_version": 1,
+  "created_at_utc": "2026-10-20T07:30:36.952176+00:00",
+  "status": "candidate",
+  "approval_status": "unapproved",
+  "published": false,
+  "original_manifest": {
+    "local_repository_relative_path": ".tmp/rag-sources/20261020-manifest-6687f09adf/manifest.json",
+    "sha256": "965a936a1aa2cd3aab2f08c467c9885a7ddacbe10b196fa7f5c397af13405411",
+    "local_exists_at_generation": true,
+    "retention": "gitignored local research artifact; not a durable publication reference"
+  },
+  "source_entries": [
+    {
+      "source_id": "rav4-published-detail",
+      "status": "candidate",
+      "approval_status": "unapproved",
+      "published": false,
+      "market": "China",
+      "model_scope": "RAV4 Rongfang / 全球第六代RAV4荣放; six named petrol/hybrid trims",
+      "model_year": null,
+      "model_year_explicit": false,
+      "model_year_evidence": "data.name states 全球第六代RAV4荣放; generation, publishTime and filename date are not an explicit model year",
+      "url": "https://os.ftms.com.cn/web-bff/website/api/car/publishedDetail?vehicleId=93",
+      "captured_at_utc": "2026-10-20T06:45:26.610329+00:00",
+      "collection_method": "Python urllib HTTPS GET; response bytes saved unchanged",
+      "sha256": "b4d847ee0bacf69716e67ddd4b89e9ca5390f14101949376117c2e4e941c914a",
+      "byte_length": 110323,
+      "source_locator": "JSON /data; nested JSON decoded from /data/paramConfig/configurationParameter",
+      "valid_from": null,
+      "valid_until": null,
+      "price_validity_verified": false,
+      "http_status": 200,
+      "response_content_type": "application/json",
+      "source_publish_time_raw": "2026-05-11 17:35:00",
+      "source_publish_time_timezone": null,
+      "configuration_title": "全球第六代RAV4荣放20260511 v10.csv",
+      "local_repository_relative_path": ".tmp/rag-sources/20261020-rav4-json-68d5c00eab/publishedDetail.json",
+      "local_exists_at_generation": true,
+      "local_retention": "gitignored local file; obtain pinned bytes matching SHA-256 before reproducing source validation"
+    },
+    {
+      "source_id": "rav4-configuration-csv",
+      "status": "candidate",
+      "approval_status": "unapproved",
+      "published": false,
+      "market": "China",
+      "model_scope": "RAV4 Rongfang / 全球第六代RAV4荣放; six named petrol/hybrid trims",
+      "model_year": null,
+      "model_year_explicit": false,
+      "model_year_evidence": "CSV header names trims; no explicit model-year claim adopted",
+      "url": "https://operate-static.ftms.com.cn/operate/4e8271d5796d4c6bb7b34b712f7907ce.csv",
+      "captured_at_utc": "2026-10-20T06:45:27.421880+00:00",
+      "collection_method": "Python urllib HTTPS GET; response bytes saved unchanged",
+      "sha256": "56159601c76d1e3efa3588dde6711dca2c1440a7acc6f3a1383dde59cb3429ae",
+      "byte_length": 11609,
+      "source_locator": "CSV parsed as UTF-8-sig; one-based record number and one-based column number; header is record 1",
+      "valid_from": null,
+      "valid_until": null,
+      "price_validity_verified": false,
+      "http_status": 200,
+      "response_content_type": "image/jpeg",
+      "detected_content": "UTF-8 CSV text",
+      "content_type_mismatch": true,
+      "record_count": 139,
+      "linked_by": "rav4-published-detail /data/paramConfig/configurationParameterUrl",
+      "comparison_with_inline_json": {
+        "compared": "All header, price and parameter cells in CSV record order against nested JSON trim/spec/param order; exact string equality",
+        "csv_record_count": 139,
+        "json_projected_record_count": 139,
+        "exact_equal": false,
+        "mismatching_record_numbers": [
+          15,
+          102
+        ],
+        "equal_after_trailing_whitespace_removal": true,
+        "difference_scope": "Only parameter labels in CSV record 15 column 2 (three trailing spaces) and record 102 column 2 (nine trailing spaces); all six trim values and all other cells match exactly",
+        "not_compared": "PDF; temporal validity; model year; manual factual approval"
+      },
+      "local_repository_relative_path": ".tmp/rag-sources/20261020-rav4-csv-5d448e6f69/configuration.csv",
+      "local_exists_at_generation": true,
+      "local_retention": "gitignored local file; obtain pinned bytes matching SHA-256 before reproducing source validation"
+    },
+    {
+      "source_id": "camry-mobile-dom-prefix",
+      "status": "candidate",
+      "approval_status": "unapproved",
+      "published": false,
+      "market": "China",
+      "model_scope": "Camry / 凯美瑞; 2027 model-year mobile page; visible 2.0L hybrid tab, not all trims",
+      "model_year": 2027,
+      "model_year_explicit": true,
+      "model_year_evidence": "Exact retained DOM line says 2027款凯美瑞",
+      "url": "https://www.gac-toyota.com.cn/vehicles/newcamry/m/",
+      "captured_at_utc": "2026-10-20T06:44:00.881Z",
+      "collection_method": "Browser document.body.innerText excerpt; lines 1-75; trimEnd per line; UTF-8 saved through Write; browser SHA-256 matched local file",
+      "sha256": "5e2f915c3a865f93b374682cde63315633904aad9ce9a420b037e9fa897f983b",
+      "byte_length": 1068,
+      "source_locator": "Original browser document.body.innerText lines 1-75, one-based",
+      "valid_from": null,
+      "valid_until": null,
+      "price_validity_verified": false,
+      "browser_sha256": "5e2f915c3a865f93b374682cde63315633904aad9ce9a420b037e9fa897f983b",
+      "coverage": "Partial page excerpt, NOT raw HTTP response or full HTML",
+      "financial_policy_terms_verified": false,
+      "local_repository_relative_path": ".tmp/rag-sources/20261020-camry-dom-4d25317f6a/body-lines-001-075.txt",
+      "local_exists_at_generation": true,
+      "local_retention": "gitignored local file; obtain pinned bytes matching SHA-256 before reproducing source validation"
+    },
+    {
+      "source_id": "camry-mobile-dom-notes",
+      "status": "candidate",
+      "approval_status": "unapproved",
+      "published": false,
+      "market": "China",
+      "model_scope": "Camry / 凯美瑞; 2027 model-year mobile page; visible 2.0L hybrid tab, not all trims",
+      "model_year": 2027,
+      "model_year_explicit": true,
+      "model_year_evidence": "Linked to same observed Camry DOM capture; see camry-mobile-dom-prefix",
+      "url": "https://www.gac-toyota.com.cn/vehicles/newcamry/m/",
+      "captured_at_utc": "2026-10-20T06:44:32.529Z",
+      "collection_method": "Browser document.body.innerText selected original lines, trimEnd, joined with LF, no final newline; browser SHA-256 matched local file",
+      "sha256": "9a320da068fcd4cf379c5d4cb76ffd87258f7d5459260efc45bc37c1e0f10298",
+      "byte_length": 845,
+      "source_locator": "Saved lines 1,2,3,4 map to original browser DOM lines 481,483,533,535 respectively",
+      "valid_from": null,
+      "valid_until": null,
+      "price_validity_verified": false,
+      "browser_sha256": "9a320da068fcd4cf379c5d4cb76ffd87258f7d5459260efc45bc37c1e0f10298",
+      "coverage": "Four selected page footnote lines",
+      "local_repository_relative_path": ".tmp/rag-sources/20261020-camry-dom-4d25317f6a/notes.txt",
+      "local_exists_at_generation": true,
+      "local_retention": "gitignored local file; obtain pinned bytes matching SHA-256 before reproducing source validation"
+    },
+    {
+      "source_id": "highlander-mobile-dom",
+      "status": "candidate",
+      "approval_status": "unapproved",
+      "published": false,
+      "market": "China",
+      "model_scope": "Highlander / 汉兰达; 2026 mobile page; hybrid and 380T named, no complete trim matrix",
+      "model_year": 2026,
+      "model_year_explicit": true,
+      "model_year_evidence": "Original normalized DOM lines 30,32,34,36,38 say 2026款汉兰达",
+      "url": "https://www.gac-toyota.com.cn/vehicles/newhighlander/m/",
+      "captured_at_utc": "2026-10-20T06:42:51.296Z",
+      "collection_method": "Browser document.body.innerText saved as UTF-8; trailing spaces trimmed per line; digest rechecked in browser at 2026-10-20T06:45:00.481Z and matched local file",
+      "sha256": "7445ae16f67dbc1d1968fc3a004e49c9c022e2f1ac51b96cbb5d52db300bd783",
+      "byte_length": 6015,
+      "source_locator": "Full observed document.body.innerText, 186 normalized lines; NOT full HTML or all unloaded/hidden UI content",
+      "valid_from": null,
+      "valid_until": null,
+      "price_validity_verified": false,
+      "browser_sha256": "7445ae16f67dbc1d1968fc3a004e49c9c022e2f1ac51b96cbb5d52db300bd783",
+      "browser_recheck_at_utc": "2026-10-20T06:45:00.481Z",
+      "coverage": "Rendered DOM text, complete observed body text only",
+      "local_repository_relative_path": ".tmp/rag-sources/20261020-highlander-dom-57f31ab748/body.txt",
+      "local_exists_at_generation": true,
+      "local_retention": "gitignored local file; obtain pinned bytes matching SHA-256 before reproducing source validation"
+    }
+  ],
+  "gold_spans": [
+    {
+      "span_id": "camry-mobile-dom-prefix:5e2f915c3a865f93:year-L28",
+      "source_id": "camry-mobile-dom-prefix",
+      "source_sha256": "5e2f915c3a865f93b374682cde63315633904aad9ce9a420b037e9fa897f983b",
+      "locator": {
+        "kind": "saved_text_lines",
+        "start_line": 28,
+        "end_line": 28,
+        "one_based": true
+      },
+      "quote": "2027款凯美瑞",
+      "quote_sha256": "a38696fc041d95b2bf67cdabffda94a2731cc065fd4c74803f7917490743d17e",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "camry-mobile-dom-prefix:5e2f915c3a865f93:he-price-L40-43",
+      "source_id": "camry-mobile-dom-prefix",
+      "source_sha256": "5e2f915c3a865f93b374682cde63315633904aad9ce9a420b037e9fa897f983b",
+      "locator": {
+        "kind": "saved_text_lines",
+        "start_line": 40,
+        "end_line": 43,
+        "one_based": true
+      },
+      "quote": "建议零售价\n\n2.0HE精英版\n￥17.98万",
+      "quote_sha256": "0d1b4201ede0cb9551d1d940d506c8e70d8580ef3a9bb546fd1bd072687db573",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "camry-mobile-dom-notes:9a320da068fcd4cf:options-L1",
+      "source_id": "camry-mobile-dom-notes",
+      "source_sha256": "9a320da068fcd4cf379c5d4cb76ffd87258f7d5459260efc45bc37c1e0f10298",
+      "locator": {
+        "kind": "saved_text_lines",
+        "start_line": 1,
+        "end_line": 1,
+        "one_based": true
+      },
+      "quote": "*1、铂金珍珠白、赛博灰外板色车型对比基础车型+2000元；磨砂灰、磨砂金外板色车型对比基础车型+3000元；铂金珍珠白黑双色、赛博灰黑双色外板色车型对比基础车型+4000元。HEV G/S/XS可选装：JBL高级环绕音响系统需另付4000元；HEV G/S/XS可选可选装：智行包需另付3500元；2.0HG/S/XS可选装：电动尾门需另付1500元。",
+      "quote_sha256": "2a0bcdbbf9fe4232ae153d6a72b5391ec61bcc99f61732590efd42870a620866",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "camry-mobile-dom-notes:9a320da068fcd4cf:fuel-conditions-L2",
+      "source_id": "camry-mobile-dom-notes",
+      "source_sha256": "9a320da068fcd4cf379c5d4cb76ffd87258f7d5459260efc45bc37c1e0f10298",
+      "locator": {
+        "kind": "saved_text_lines",
+        "start_line": 2,
+        "end_line": 2,
+        "one_based": true
+      },
+      "quote": "*2、以上数据是凯美瑞2.0HE智能电混双擎精英版、凯美瑞2.0HGVP智能电混双擎豪华版的油耗数据，与中华人民共和国工业和信息化部备案一致，具体油耗会由于使用环境、驾驶方法、车型版本等不同而有所变化。",
+      "quote_sha256": "9fcaacc33552bc83df356cf14f0cdc372699a8378add5d68c6c3bb8125b9d6bb",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "camry-mobile-dom-notes:9a320da068fcd4cf:partial-equipment-L4",
+      "source_id": "camry-mobile-dom-notes",
+      "source_sha256": "9a320da068fcd4cf379c5d4cb76ffd87258f7d5459260efc45bc37c1e0f10298",
+      "locator": {
+        "kind": "saved_text_lines",
+        "start_line": 4,
+        "end_line": 4,
+        "one_based": true
+      },
+      "quote": "标*为部分车型配备，详情请查阅配置表。",
+      "quote_sha256": "1633bbfb9b81743e06e5523cdff93f60c6a98a711b4a8ff53a54980bd1470f1b",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "highlander-mobile-dom:7445ae16f67dbc1d:year-L30",
+      "source_id": "highlander-mobile-dom",
+      "source_sha256": "7445ae16f67dbc1d1968fc3a004e49c9c022e2f1ac51b96cbb5d52db300bd783",
+      "locator": {
+        "kind": "saved_text_lines",
+        "start_line": 30,
+        "end_line": 30,
+        "one_based": true
+      },
+      "quote": "2026款汉兰达",
+      "quote_sha256": "6590cf1c52ad51cedc0d8a47d6e1b9d92c9472a3f9c49f568448d1aa6e2b2a8e",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "highlander-mobile-dom:7445ae16f67dbc1d:power-L55-56",
+      "source_id": "highlander-mobile-dom",
+      "source_sha256": "7445ae16f67dbc1d1968fc3a004e49c9c022e2f1ac51b96cbb5d52db300bd783",
+      "locator": {
+        "kind": "saved_text_lines",
+        "start_line": 55,
+        "end_line": 56,
+        "one_based": true
+      },
+      "quote": "智能电混双擎、\n380T动力可选",
+      "quote_sha256": "d384146c49de97a289f474249e5a01bdfd94e69deac1431c837bc46b447bc026",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "highlander-mobile-dom:7445ae16f67dbc1d:options-L125",
+      "source_id": "highlander-mobile-dom",
+      "source_sha256": "7445ae16f67dbc1d1968fc3a004e49c9c022e2f1ac51b96cbb5d52db300bd783",
+      "locator": {
+        "kind": "saved_text_lines",
+        "start_line": 125,
+        "end_line": 125,
+        "one_based": true
+      },
+      "quote": "*1、选择铂金珍珠白、赛博金外板色车型需另付2000元，选装ETC选装需另付600元。",
+      "quote_sha256": "a73346b38300f6be6d3a25f2d19cfe69725d50de04b968cb6a9c6fec30e89e6a",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "highlander-mobile-dom:7445ae16f67dbc1d:connected-conditions-L157",
+      "source_id": "highlander-mobile-dom",
+      "source_sha256": "7445ae16f67dbc1d1968fc3a004e49c9c022e2f1ac51b96cbb5d52db300bd783",
+      "locator": {
+        "kind": "saved_text_lines",
+        "start_line": 157,
+        "end_line": 157,
+        "one_based": true
+      },
+      "quote": "*7、丰云悦享服务附带5年免费期(按购车发票日计算)，需要申请开通服务后方可使用。广汽丰田为开通了丰云悦享且该车型版本具有相应配置的顾客提供5年(按购车发票日计算)的数字钥匙、在线音乐、在线电台、在线视频的服务，并赠送48G的流量包(有效期两年，按购车发票日计算，超出后可自行购买流量加油包或者通过WiFi使用在线服务)。在线音乐和在线电台、在线视频的会员服务或其他相关增值服务由顾客根据需要向应用服务供应商自行购买。受手机兼容性或者通信运营商信号覆盖情况影响，部分手机型号或部分信号覆盖情况欠佳的地域可能无法正常使用丰云悦享服务，详情请咨询当地经销店。",
+      "quote_sha256": "58becdbca6d11ced08d35ad7d890d34c5a3514b49537b84166b12e92c4e440ac",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "highlander-mobile-dom:7445ae16f67dbc1d:assist-limit-L133-135",
+      "source_id": "highlander-mobile-dom",
+      "source_sha256": "7445ae16f67dbc1d1968fc3a004e49c9c022e2f1ac51b96cbb5d52db300bd783",
+      "locator": {
+        "kind": "saved_text_lines",
+        "start_line": 133,
+        "end_line": 135,
+        "one_based": true
+      },
+      "quote": "■ 本系统可能因道路情况、十字路口情况、车辆情况、天气状况等原因无法使用。另外，即使无碰撞的可能性，系统也会存在动作的可能，详细内容请参阅用户手册。\n■ 预碰撞安全只是驾驶辅助功能，请勿过分依赖本功能，务必履行驾驶者职责。\n■ 数值为丰田公司内部测试数值。",
+      "quote_sha256": "f21a7feeea6fb705fc74c072e1620de87c6360813b111f63f9317e2b588464af",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "rav4-published-detail:b4d847ee0bacf697:generation",
+      "source_id": "rav4-published-detail",
+      "source_sha256": "b4d847ee0bacf69716e67ddd4b89e9ca5390f14101949376117c2e4e941c914a",
+      "locator": {
+        "kind": "outer_json_scalar",
+        "pointer": "/data/name"
+      },
+      "quote": "全球第六代RAV4荣放",
+      "quote_sha256": "3cf5899293bb403e2d9a7277db6761e5f9c9ace20bdd2e7b4270131fa89f70fd",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "rav4-published-detail:b4d847ee0bacf697:remarks",
+      "source_id": "rav4-published-detail",
+      "source_sha256": "b4d847ee0bacf69716e67ddd4b89e9ca5390f14101949376117c2e4e941c914a",
+      "locator": {
+        "kind": "outer_json_scalar",
+        "pointer": "/data/paramConfig/remarks"
+      },
+      "quote": "<p style=\"line-height: 1;\">注：</p><p style=\"line-height: 1;\">“●”表示有此配置，“-”表示无此配置。</p><p style=\"line-height: 1;\">* 在通信状况不理想的状态下，此服务可能出现无法使用的情况。详情请咨询经销店。</p><p style=\"line-height: 1;\">■ 铂金白色、岩石灰x极夜黑<span style=\"color: rgb(0, 0, 0); background-color: rgb(255, 255, 255); font-size: 14px;\">双拼色</span>为特别选装色，需加付2000元。</p><p style=\"line-height: 1;\">■ 铂金白x极夜黑<span style=\"color: rgb(0, 0, 0); background-color: rgb(255, 255, 255); font-size: 14px;\">双拼色</span>为特别选装色，需加付4000元。</p><p style=\"line-height: 1;\"><br></p><p style=\"line-height: 1;\">本页面中所展示的车辆细节、颜色、描述和插图等仅供参考，具体以实车为准。</p>",
+      "quote_sha256": "586b52091a86485aa5735cda32d06cb443f3ce5adc33be4d2a5df8ccb2b2ca50",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "rav4-published-detail:b4d847ee0bacf697:dimension-t0",
+      "source_id": "rav4-published-detail",
+      "source_sha256": "b4d847ee0bacf69716e67ddd4b89e9ca5390f14101949376117c2e4e941c914a",
+      "locator": {
+        "kind": "nested_json_selection",
+        "outer_pointer": "/data/paramConfig/configurationParameter",
+        "decode_nested_json": true,
+        "trim_name_pointer": "/data/0/name",
+        "catalog_pointer": "/data/0/spec/1/catalog",
+        "parameter_pointer": "/data/0/spec/1/params/0",
+        "serialization": "JSON object trim_name,catalog,parameter in this order; ensure_ascii=False,separators=(',',':')"
+      },
+      "quote": "{\"trim_name\":\"2.0L汽油版<br/>豪华版\",\"catalog\":\"尺寸·质量\",\"parameter\":{\"name\":\"长×宽×高   (mm)\",\"txt\":\"4,620×1,855×1,680\"}}",
+      "quote_sha256": "a32034ae56ef944909c9117a1e33adceaba2d719f2ca7d3aac06d0b91fa1d8a8",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "rav4-published-detail:b4d847ee0bacf697:wltc-t2",
+      "source_id": "rav4-published-detail",
+      "source_sha256": "b4d847ee0bacf69716e67ddd4b89e9ca5390f14101949376117c2e4e941c914a",
+      "locator": {
+        "kind": "nested_json_selection",
+        "outer_pointer": "/data/paramConfig/configurationParameter",
+        "decode_nested_json": true,
+        "trim_name_pointer": "/data/2/name",
+        "catalog_pointer": "/data/2/spec/2/catalog",
+        "parameter_pointer": "/data/2/spec/2/params/8",
+        "serialization": "JSON object trim_name,catalog,parameter in this order; ensure_ascii=False,separators=(',',':')"
+      },
+      "quote": "{\"trim_name\":\"2.0L双擎版<br/>精英版\",\"catalog\":\"发动机·变速箱\",\"parameter\":{\"name\":\"WLTC综合工况油耗   (L/100km)\",\"txt\":\"4.59\"}}",
+      "quote_sha256": "65c22b3089d67bfb103cb6c034b10a8ab4d1a86f41407b30b87970a0db75195f",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "rav4-published-detail:b4d847ee0bacf697:drive-t4",
+      "source_id": "rav4-published-detail",
+      "source_sha256": "b4d847ee0bacf69716e67ddd4b89e9ca5390f14101949376117c2e4e941c914a",
+      "locator": {
+        "kind": "nested_json_selection",
+        "outer_pointer": "/data/paramConfig/configurationParameter",
+        "decode_nested_json": true,
+        "trim_name_pointer": "/data/4/name",
+        "catalog_pointer": "/data/4/spec/3/catalog",
+        "parameter_pointer": "/data/4/spec/3/params/1",
+        "serialization": "JSON object trim_name,catalog,parameter in this order; ensure_ascii=False,separators=(',',':')"
+      },
+      "quote": "{\"trim_name\":\"2.5L双擎版<br/>四驱豪华版\",\"catalog\":\"悬架·制动·驱动方式\",\"parameter\":{\"name\":\"驱动方式\",\"txt\":\"E-FOUR电子四驱\"}}",
+      "quote_sha256": "29661a1cd0ee8db715a54f019be80ea14da8381ef260b00e23fbeb940f823d1a",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "rav4-published-detail:b4d847ee0bacf697:system-power-t4",
+      "source_id": "rav4-published-detail",
+      "source_sha256": "b4d847ee0bacf69716e67ddd4b89e9ca5390f14101949376117c2e4e941c914a",
+      "locator": {
+        "kind": "nested_json_selection",
+        "outer_pointer": "/data/paramConfig/configurationParameter",
+        "decode_nested_json": true,
+        "trim_name_pointer": "/data/4/name",
+        "catalog_pointer": "/data/4/spec/4/catalog",
+        "parameter_pointer": "/data/4/spec/4/params/2",
+        "serialization": "JSON object trim_name,catalog,parameter in this order; ensure_ascii=False,separators=(',',':')"
+      },
+      "quote": "{\"trim_name\":\"2.5L双擎版<br/>四驱豪华版\",\"catalog\":\"双擎系统\",\"parameter\":{\"name\":\"双擎系统最大输出功率   (kW)\",\"txt\":\"174\"}}",
+      "quote_sha256": "adf3a685866182b4f18132ca1d397ab10613d3637e4a0e371fb78a25053b80fa",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "rav4-published-detail:b4d847ee0bacf697:pvm-t2",
+      "source_id": "rav4-published-detail",
+      "source_sha256": "b4d847ee0bacf69716e67ddd4b89e9ca5390f14101949376117c2e4e941c914a",
+      "locator": {
+        "kind": "nested_json_selection",
+        "outer_pointer": "/data/paramConfig/configurationParameter",
+        "decode_nested_json": true,
+        "trim_name_pointer": "/data/2/name",
+        "catalog_pointer": "/data/2/spec/14/catalog",
+        "parameter_pointer": "/data/2/spec/14/params/14",
+        "serialization": "JSON object trim_name,catalog,parameter in this order; ensure_ascii=False,separators=(',',':')"
+      },
+      "quote": "{\"trim_name\":\"2.0L双擎版<br/>精英版\",\"catalog\":\"Toyota Pilot智能驾驶辅助\",\"parameter\":{\"name\":\"PVM全景监控系统（带3D视图）\",\"txt\":\"-\"}}",
+      "quote_sha256": "5171cd7daa397de6f2ae7dbd23dc0d05225f73a2e7c402bd8a8a6c6def26718c",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "rav4-published-detail:b4d847ee0bacf697:pvm-t5",
+      "source_id": "rav4-published-detail",
+      "source_sha256": "b4d847ee0bacf69716e67ddd4b89e9ca5390f14101949376117c2e4e941c914a",
+      "locator": {
+        "kind": "nested_json_selection",
+        "outer_pointer": "/data/paramConfig/configurationParameter",
+        "decode_nested_json": true,
+        "trim_name_pointer": "/data/5/name",
+        "catalog_pointer": "/data/5/spec/14/catalog",
+        "parameter_pointer": "/data/5/spec/14/params/14",
+        "serialization": "JSON object trim_name,catalog,parameter in this order; ensure_ascii=False,separators=(',',':')"
+      },
+      "quote": "{\"trim_name\":\"2.5L双擎版<br/>四驱旗舰版\",\"catalog\":\"Toyota Pilot智能驾驶辅助\",\"parameter\":{\"name\":\"PVM全景监控系统（带3D视图）\",\"txt\":\"●\"}}",
+      "quote_sha256": "6d0f74d62c15ff95d5fadf1db24635bf27caa5ac905b996cfab054c5efff8312",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "rav4-published-detail:b4d847ee0bacf697:screen-t2",
+      "source_id": "rav4-published-detail",
+      "source_sha256": "b4d847ee0bacf69716e67ddd4b89e9ca5390f14101949376117c2e4e941c914a",
+      "locator": {
+        "kind": "nested_json_selection",
+        "outer_pointer": "/data/paramConfig/configurationParameter",
+        "decode_nested_json": true,
+        "trim_name_pointer": "/data/2/name",
+        "catalog_pointer": "/data/2/spec/13/catalog",
+        "parameter_pointer": "/data/2/spec/13/params/4",
+        "serialization": "JSON object trim_name,catalog,parameter in this order; ensure_ascii=False,separators=(',',':')"
+      },
+      "quote": "{\"trim_name\":\"2.0L双擎版<br/>精英版\",\"catalog\":\"Toyota Space智慧空间\",\"parameter\":{\"name\":\"多媒体显示屏\",\"txt\":\"●14英寸\"}}",
+      "quote_sha256": "752981fdb94f3dcfdd76a509baf37da4ddbde5ea45ae9ed095b01dab81b6dcfc",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "rav4-published-detail:b4d847ee0bacf697:ap-t4",
+      "source_id": "rav4-published-detail",
+      "source_sha256": "b4d847ee0bacf69716e67ddd4b89e9ca5390f14101949376117c2e4e941c914a",
+      "locator": {
+        "kind": "nested_json_selection",
+        "outer_pointer": "/data/paramConfig/configurationParameter",
+        "decode_nested_json": true,
+        "trim_name_pointer": "/data/4/name",
+        "catalog_pointer": "/data/4/spec/14/catalog",
+        "parameter_pointer": "/data/4/spec/14/params/21",
+        "serialization": "JSON object trim_name,catalog,parameter in this order; ensure_ascii=False,separators=(',',':')"
+      },
+      "quote": "{\"trim_name\":\"2.5L双擎版<br/>四驱豪华版\",\"catalog\":\"Toyota Pilot智能驾驶辅助\",\"parameter\":{\"name\":\"AP智能泊车辅助\",\"txt\":\"-\"}}",
+      "quote_sha256": "33ab68e1168bd00bced11285b374b5858d0d88152b3df585d6a99b770508f0a6",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "rav4-published-detail:b4d847ee0bacf697:ap-t5",
+      "source_id": "rav4-published-detail",
+      "source_sha256": "b4d847ee0bacf69716e67ddd4b89e9ca5390f14101949376117c2e4e941c914a",
+      "locator": {
+        "kind": "nested_json_selection",
+        "outer_pointer": "/data/paramConfig/configurationParameter",
+        "decode_nested_json": true,
+        "trim_name_pointer": "/data/5/name",
+        "catalog_pointer": "/data/5/spec/14/catalog",
+        "parameter_pointer": "/data/5/spec/14/params/21",
+        "serialization": "JSON object trim_name,catalog,parameter in this order; ensure_ascii=False,separators=(',',':')"
+      },
+      "quote": "{\"trim_name\":\"2.5L双擎版<br/>四驱旗舰版\",\"catalog\":\"Toyota Pilot智能驾驶辅助\",\"parameter\":{\"name\":\"AP智能泊车辅助\",\"txt\":\"●\"}}",
+      "quote_sha256": "28e38a0216443fb709d5f6cefd088f44b60bfbe5fbf893fdb38543c53e912c4c",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    },
+    {
+      "span_id": "rav4-published-detail:b4d847ee0bacf697:price-t2",
+      "source_id": "rav4-published-detail",
+      "source_sha256": "b4d847ee0bacf69716e67ddd4b89e9ca5390f14101949376117c2e4e941c914a",
+      "locator": {
+        "kind": "nested_json_selection",
+        "outer_pointer": "/data/paramConfig/configurationParameter",
+        "decode_nested_json": true,
+        "name_pointer": "/data/2/name",
+        "value_pointer": "/data/2/price",
+        "serialization": "JSON object name,price; ensure_ascii=False,separators=(',',':')"
+      },
+      "quote": "{\"name\":\"2.0L双擎版<br/>精英版\",\"price\":\"169800\"}",
+      "quote_sha256": "b044e0badee7a9d1353616d0d6f1d89f762e5cb88a3c0e6c75483f11e793d721",
+      "review_status": "candidate",
+      "approval_status": "unapproved"
+    }
+  ],
+  "tool_contract_reference": {
+    "repository_relative_path": "backend/app/services/knowledge/tools.py",
+    "sha256_at_generation": "e3d55202fded047a431b56e85c7d8c2927f544c3141bc612099bc46204a59991",
+    "line_ranges_at_generation": [
+      [
+        67,
+        72
+      ],
+      [
+        86,
+        121
+      ],
+      [
+        229,
+        234
+      ]
+    ],
+    "role": "Local tool assertion semantics only, never presented as an official vehicle source or retrieval gold"
+  },
+  "citation_policy": "Gold span IDs bind original byte hash plus source locator. Embedded quotes are durable candidate evidence excerpts, not full raw sources or approved published facts. Local .tmp paths are optional provenance, not permanent published citations.",
+  "development_dataset": {
+    "repository_relative_path": "docs/rag-v2/evaluation/development.jsonl",
+    "sha256": "cbedbb18f9b4b388ef0d12f058ccc017911559ed28c1acb3cf8a5822fb4da7a6",
+    "count": 31,
+    "review_status": "candidate",
+    "split": "development",
+    "holdout": false
+  }
+}

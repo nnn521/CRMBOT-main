@@ -637,12 +637,54 @@ kb_service = KnowledgeBaseService()
 # LangGraph 节点函数
 # ═══════════════════════════════════════════════════════════════
 
+async def _knowledge_v2_answer_node(state: SalesState) -> SalesState:
+    """Complete one budgeted knowledge answer; never fall back to free generation."""
+    from app.agents.state import state_update_with_reply
+    from app.services.knowledge.runtime import open_knowledge_runtime
+    from app.services.knowledge.tool_routing import tool_answer_bundle
+
+    messages = state.get("messages", [])
+    last = messages[-1] if messages else None
+    query = last.get("content", "") if isinstance(last, dict) else getattr(last, "content", "")
+    state.update(citations=[], knowledge_release_id=None, answer_status="unavailable",
+                 data_as_of=None, assumptions=[], limitations=[], knowledge_results=[])
+    try:
+        result = await tool_answer_bundle(str(query))
+        if result is None:
+            previous = []
+            for message in messages[:-1]:
+                role = message.get("role") if isinstance(message, dict) else getattr(message, "type", "")
+                content = message.get("content") if isinstance(message, dict) else getattr(message, "content", "")
+                if role in ("user", "human") and isinstance(content, str):
+                    previous.append(content)
+            if str(query).strip(" ！!。.") in ("你好", "您好", "谢谢", "再见", "hello", "hi"):
+                result = {"reply": "你好，我可以帮你查凯美瑞、汉兰达和 RAV4 荣放的官方资料，也可以按你提供的本金、年利率和期限估算月供。", "answer_status": "answered"}
+            else:
+                async with open_knowledge_runtime() as runtime:
+                    result = await runtime.answer_bundle(str(query), previous_user_messages=previous[-4:])
+        for key in ("citations", "knowledge_release_id", "answer_status", "data_as_of",
+                    "assumptions", "limitations"):
+            if key in result:
+                state[key] = result[key]
+        reply = result["reply"]
+    except Exception:
+        logger.warning("RAG v2 answer unavailable; no unsupported fallback was generated")
+        reply = "知识服务暂时不可用，当前无法确认产品配置、价格或政策，请稍后重试。"
+    # A reply is complete here. Empty knowledge_results routes to sales_response,
+    # whose existing early return avoids both regeneration and another AIMessage.
+    state["next_node"] = "sales_response"
+    return state_update_with_reply(state, reply)
+
+
 async def knowledge_retrieval_node(state: SalesState) -> SalesState:
     """
     知识库检索节点 - 防御性增强版
     
     无论发生任何情况，都返回干净的 state 字典，绝不报错崩溃
     """
+    if settings.rag_v2_enabled:
+        return await _knowledge_v2_answer_node(state)
+
     session_id = state.get("session_id", "unknown")
     logger.info(f"[Session: {session_id}] 开始知识库检索")
     

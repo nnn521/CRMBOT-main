@@ -1,9 +1,9 @@
 import { useRef, useState, useEffect } from 'react'
-import { Loader2, Cpu, Sparkles } from 'lucide-react'
+import { Loader2, Cpu } from 'lucide-react'
 import { useHermesStore } from '@/stores/hermes'
 
 export default function HermesChatArea() {
-  const { messages, isLoading, isOnline, sendMessage } = useHermesStore()
+  const { messages, isLoading, sendMessage } = useHermesStore()
   const [input, setInput] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)

@@ -4,7 +4,9 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
+from urllib.parse import unquote
+import re
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -74,6 +76,45 @@ class DocumentInfo(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class CitationInfo(BaseModel):
+    """Public, versioned citation contract; URLs always resolve through the knowledge API."""
+    citation_id: str = Field(..., min_length=1, strict=True)
+    span_id: str = Field(..., min_length=1, strict=True)
+    source_id: str = Field(..., min_length=1, strict=True)
+    document_version: str = Field(..., min_length=1, strict=True)
+    title: str = Field(..., strict=True)
+    locator: Dict[str, Any]
+    quote: str = Field(..., strict=True)
+    url: str = Field(..., strict=True)
+
+    @field_validator("url")
+    @classmethod
+    def internal_knowledge_url(cls, value: str) -> str:
+        # Restrict links to the authenticated JSON-detail route, never a disk path
+        # or an arbitrary origin. Decode repeatedly to reject encoded traversal.
+        decoded = value
+        for _ in range(8):
+            next_value = unquote(decoded)
+            if next_value == decoded:
+                break
+            decoded = next_value
+        if not re.fullmatch(
+            r"/api/v1/knowledge/releases/[^/\\?#\s%]+/citations/[^/\\?#\s%]+", decoded
+        ) or any(part in {".", ".."} for part in decoded.split("/")):
+            raise ValueError("citation URL must use the internal knowledge detail API")
+        return value
+
+
+class ChatAnswerInfo(BaseModel):
+    """Allowlisted answer fields shared by HTTP, WS and persisted history."""
+    citations: Optional[List[CitationInfo]] = None
+    knowledge_release_id: Optional[str] = Field(None, strict=True)
+    answer_status: Optional[Literal["answered", "partial", "clarification", "unavailable"]] = None
+    data_as_of: Optional[str] = Field(None, strict=True)
+    assumptions: Optional[List[str]] = None
+    limitations: Optional[List[str]] = None
+
+
 class ChatRequest(BaseModel):
     """
     聊天请求模型 - 前端传入的消息格式
@@ -116,7 +157,7 @@ class ChatRequest(BaseModel):
         return v.strip()
 
 
-class ChatResponse(BaseModel):
+class ChatResponse(ChatAnswerInfo):
     """
     聊天响应模型 - 返回给前端的数据
     

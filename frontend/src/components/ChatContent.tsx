@@ -1,5 +1,4 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { useOutletContext } from 'react-router-dom'
 import {
   MessageSquare,
   PanelRightClose,
@@ -18,9 +17,20 @@ import HermesChatArea from './HermesChatArea'
 import { useChatStore } from '@/stores/chat'
 import { useHermesStore } from '@/stores/hermes'
 import { checkHermesHealth } from '@/api/hermes'
-import { fetchSessions, createSession, getChatMessages, switchHandover, getSuggestedReplies, dismissHighIntent, sendHumanMessage } from '@/api/sessions'
+import {
+  fetchSessions,
+  getChatMessages,
+  switchHandover,
+  getSuggestedReplies,
+  dismissHighIntent,
+  sendHumanMessage,
+  updateSessionStatus,
+  apiMessageToChatMessage,
+  normalizeStatus,
+  type SessionStatus,
+} from '@/api/sessions'
 import { useWebSocket } from '@/hooks/useWebSocket'
-import type { Session, ChatMessage, DocumentInfo, HighIntentAlert } from '@/types'
+import type { Session, ChatMessage, HighIntentAlert, WebSocketEvent } from '@/types'
 
 const statusConfig: Record<Session['status'], { label: string; className: string }> = {
   new: { label: '🟡 新客户', className: 'bg-amber-50 text-amber-800 border-amber-200' },
@@ -33,15 +43,11 @@ const statusConfig: Record<Session['status'], { label: string; className: string
 export default function ChatContent() {
   const sessions = useChatStore((s) => s.sessions)
   const setSessions = useChatStore((s) => s.setSessions)
-  const addSession = useChatStore((s) => s.addSession)
-  const attachedDocs = useChatStore((s) => s.attachedDocs)
-  const attachedImages = useChatStore((s) => s.attachedImages)
   const attachDocuments = useChatStore((s) => s.attachDocuments)
   const attachImages = useChatStore((s) => s.attachImages)
   const handoverModes = useChatStore((s) => s.handoverModes)
   const setHandoverMode = useChatStore((s) => s.setHandoverMode)
   const highIntentAlerts = useChatStore((s) => s.highIntentAlerts)
-  const addHighIntentAlert = useChatStore((s) => s.addHighIntentAlert)
   const dismissHighIntentAlert = useChatStore((s) => s.dismissHighIntentAlert)
   const sessionMessages = useChatStore((s) => s.sessionMessages)
   const appendSessionMessage = useChatStore((s) => s.appendSessionMessage)
@@ -59,8 +65,7 @@ export default function ChatContent() {
     setSessionLoading(true)
     fetchSessions()
       .then((data) => {
-        const list = data.sessions || []
-        setSessions(list)
+        setSessions(data.sessions || [])
       })
       .catch((err) => {
         console.error('Failed to fetch sessions:', err)
@@ -68,66 +73,60 @@ export default function ChatContent() {
       .finally(() => setSessionLoading(false))
   }, [setSessions])
 
-  const handleSelectSession = useCallback((id: string) => {
-    if (id === 'hermes') {
-      setActiveSessionId('hermes')
-      setPanelVisible(false)
+  const handleSelectSession = useCallback(
+    (id: string) => {
+      if (id === 'hermes') {
+        setActiveSessionId('hermes')
+        setPanelVisible(false)
+        setShowSuggestPanel(false)
+        setAiSuggestions([])
+        // Check Hermes health and set online status
+        checkHermesHealth()
+          .then((r) => {
+            useHermesStore.getState().setOnline(r.online, r.detail)
+          })
+          .catch(() => {})
+        return
+      }
+      setActiveSessionId(id)
+      setPanelVisible(true)
       setShowSuggestPanel(false)
       setAiSuggestions([])
-      // Check Hermes health and set online status
-      checkHermesHealth().then((r) => {
-        useHermesStore.getState().setOnline(r.online, r.detail)
-      }).catch(() => {})
-      return
-    }
-    setActiveSessionId(id)
-    setPanelVisible(true)
-    setShowSuggestPanel(false)
-    setAiSuggestions([])
-    // Load messages for this session from API
-    getChatMessages(id)
-      .then((data) => {
-        const msgs: ChatMessage[] = (data.messages || []).map((m: any) => ({
-          id: String(m.id),
-          role: m.role,
-          content: m.content,
-          timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
-        }))
-        setSessionMessages(id, msgs)
-      })
-      .catch(console.error)
-  }, [setSessionMessages])
-
-  const handleNewSession = useCallback(async () => {
-    try {
-      const { session } = await createSession('新会话')
-      addSession(session)
-      setActiveSessionId(session.id)
-      setPanelVisible(false)
-    } catch (err) {
-      console.error('Failed to create session:', err)
-    }
-  }, [addSession])
+      getChatMessages(id)
+        .then((data) => {
+          const msgs: ChatMessage[] = (data.messages || []).map(apiMessageToChatMessage)
+          setSessionMessages(id, msgs)
+        })
+        .catch(console.error)
+    },
+    [setSessionMessages],
+  )
 
   // ── Handover: shared inner helper (accepts sessionId) ──
-  const switchHandoverInner = useCallback(async (sessionId: string, mode: 'ai' | 'human') => {
-    await switchHandover(sessionId, mode)
-    setHandoverMode(sessionId, mode)
-    if (mode === 'ai') {
-      setShowSuggestPanel(false)
-      setAiSuggestions([])
-    }
-  }, [setHandoverMode])
+  const switchHandoverInner = useCallback(
+    async (sessionId: string, mode: 'ai' | 'human') => {
+      await switchHandover(sessionId, mode)
+      setHandoverMode(sessionId, mode)
+      if (mode === 'ai') {
+        setShowSuggestPanel(false)
+        setAiSuggestions([])
+      }
+    },
+    [setHandoverMode],
+  )
 
   // ── Handover: switch AI/human mode (UI button, uses activeSessionId) ──
-  const handleSwitchHandover = useCallback(async (mode: 'ai' | 'human') => {
-    if (!activeSessionId) return
-    try {
-      await switchHandoverInner(activeSessionId, mode)
-    } catch (err) {
-      console.error('Failed to switch handover:', err)
-    }
-  }, [activeSessionId, switchHandoverInner])
+  const handleSwitchHandover = useCallback(
+    async (mode: 'ai' | 'human') => {
+      if (!activeSessionId) return
+      try {
+        await switchHandoverInner(activeSessionId, mode)
+      } catch (err) {
+        console.error('Failed to switch handover:', err)
+      }
+    },
+    [activeSessionId, switchHandoverInner],
+  )
 
   // ── Handover: get AI suggestions ──
   const handleGetSuggestions = useCallback(async () => {
@@ -145,173 +144,159 @@ export default function ChatContent() {
     }
   }, [activeSessionId])
 
+  // ── 会话状态流转（驱动报表漏斗） ──
+  const handleStatusChange = useCallback(
+    async (sessionId: string, status: SessionStatus) => {
+      try {
+        await updateSessionStatus(sessionId, status)
+        setSessions(
+          useChatStore.getState().sessions.map((s) => (s.id === sessionId ? { ...s, status } : s)),
+        )
+      } catch (err) {
+        console.error('Failed to update session status:', err)
+      }
+    },
+    [setSessions],
+  )
+
   // ── High intent alert: take over immediately (uses shared inner) ──
-  const handleTakeOver = useCallback(async (sessionId: string) => {
-    try {
-      await switchHandoverInner(sessionId, 'human')
-      dismissHighIntentAlert(sessionId)
-      // Navigate to this session
-      setActiveSessionId(sessionId)
-      setPanelVisible(true)
-      // Load messages
-      getChatMessages(sessionId)
-        .then((data) => {
-          const msgs: ChatMessage[] = (data.messages || []).map((m: any) => ({
-            id: String(m.id),
-            role: m.role,
-            content: m.content,
-            timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
-          }))
-          setSessionMessages(sessionId, msgs)
-        })
-        .catch(console.error)
-    } catch (err) {
-      console.error('Failed to take over:', err)
-    }
-  }, [switchHandoverInner, dismissHighIntentAlert, setSessionMessages])
+  const handleTakeOver = useCallback(
+    async (sessionId: string) => {
+      try {
+        await switchHandoverInner(sessionId, 'human')
+        dismissHighIntentAlert(sessionId)
+        setActiveSessionId(sessionId)
+        setPanelVisible(true)
+        getChatMessages(sessionId)
+          .then((data) => {
+            setSessionMessages(sessionId, (data.messages || []).map(apiMessageToChatMessage))
+          })
+          .catch(console.error)
+      } catch (err) {
+        console.error('Failed to take over:', err)
+      }
+    },
+    [switchHandoverInner, dismissHighIntentAlert, setSessionMessages],
+  )
 
   // ── Dismiss high intent alert (frontend + 后端 DB) ──
-  const handleDismiss = useCallback(async (sessionId: string) => {
-    dismissHighIntentAlert(sessionId)
-    try {
-      await dismissHighIntent(sessionId)
-    } catch (err) {
-      console.error('Failed to dismiss high intent:', err)
-    }
-  }, [dismissHighIntentAlert])
+  const handleDismiss = useCallback(
+    async (sessionId: string) => {
+      dismissHighIntentAlert(sessionId)
+      try {
+        await dismissHighIntent(sessionId)
+      } catch (err) {
+        console.error('Failed to dismiss high intent:', err)
+      }
+    },
+    [dismissHighIntentAlert],
+  )
 
   // ── Human mode: send message via new API ──
-  const handleAdminSend = useCallback(async (content: string) => {
-    if (!activeSessionId) return
-    // 不本地添加，等 WS 广播统一推送（避免重复+角色不一致）
-    try {
-      await sendHumanMessage(activeSessionId, content)
-    } catch(e) {
-      console.error('[B-SEND] Failed:', e)
-    }
-  }, [activeSessionId])
+  const handleAdminSend = useCallback(
+    async (content: string) => {
+      if (!activeSessionId) return
+      // 不本地添加，等 WS 广播统一推送（避免重复+角色不一致）
+      try {
+        await sendHumanMessage(activeSessionId, content)
+      } catch (e) {
+        console.error('[B-SEND] Failed:', e)
+      }
+    },
+    [activeSessionId],
+  )
 
   // ── WebSocket: real-time updates ──
   const activeSessionIdRef = useRef(activeSessionId)
   activeSessionIdRef.current = activeSessionId
-  const handleWsMessage = useCallback((data: any) => {
-    console.log('[B-WS] event:', data.type, data.session_id, data.message?.id)
-    if (data.type === 'new_message' && data.session_id && data.message?.id) {
-      const payload = data.message
-      const chatMsg: ChatMessage = {
-        id: String(payload.id),
-        sessionId: data.session_id,
-        role: payload.role,
-        content: payload.content,
-        timestamp: payload.timestamp ? new Date(payload.timestamp).getTime() : Date.now(),
-        status: 'sent',
+
+  const handleWsMessage = useCallback(
+    (data: WebSocketEvent) => {
+      if (data.type === 'new_message' && data.session_id && data.message?.id) {
+        const payload = data.message
+        const chatMsg = apiMessageToChatMessage({ ...payload, session_id: data.session_id })
+        appendSessionMessage(data.session_id, chatMsg)
+        if (chatMsg.documents?.length) attachDocuments(chatMsg.id, chatMsg.documents)
+        if (chatMsg.images?.length) attachImages(chatMsg.id, chatMsg.images)
       }
-      appendSessionMessage(data.session_id, chatMsg)
 
-      const docs: DocumentInfo[] = payload.documents ?? []
-      if (docs.length > 0) {
-        const mapped = docs.map((d: any) => ({
-          file_name: d.filename || d.file_name,
-          file_path: d.path || d.file_path || `/api/v1/documents/${encodeURIComponent(d.filename || d.file_name)}`,
-          doc_type: d.type || d.doc_type || 'unknown',
-          file_size: d.size || d.file_size || 0,
-        }))
-        attachDocuments(chatMsg.id, mapped)
+      // Handover mode update
+      if (data.type === 'handover_update' && data.session_id) {
+        useChatStore.getState().setHandoverMode(data.session_id, data.mode as 'ai' | 'human')
       }
-      const imgs: string[] = payload.images ?? []
-      if (imgs.length > 0) attachImages(chatMsg.id, imgs)
-    }
 
-    // Handover mode update
-    if (data.type === 'handover_update') {
-      useChatStore.getState().setHandoverMode(data.session_id, data.mode)
-    }
-
-    // High intent alert
-    if (data.type === 'high_intent_alert') {
-      // Issue #4: 去重 — 同一会话只显示一次高意向提醒
-      const existing = useChatStore.getState().highIntentAlerts
-      if (existing.find((a: HighIntentAlert) => a.session_id === data.session_id)) return
-      const alert: HighIntentAlert = {
-        type: 'high_intent_alert',
-        session_id: data.session_id,
-        customer_name: data.customer_name || '客户',
-        trigger_message: data.trigger_message || '',
-        intent: data.intent || '',
-        timestamp: data.timestamp || new Date().toISOString(),
+      // High intent alert
+      if (data.type === 'high_intent_alert' && data.session_id) {
+        const existing = useChatStore.getState().highIntentAlerts
+        if (existing.find((a: HighIntentAlert) => a.session_id === data.session_id)) return
+        const alert: HighIntentAlert = {
+          type: 'high_intent_alert',
+          session_id: data.session_id,
+          customer_name: String(data.customer_name || '客户'),
+          trigger_message: String(data.trigger_message || ''),
+          intent: String(data.intent || ''),
+          timestamp: data.timestamp || new Date().toISOString(),
+        }
+        useChatStore.getState().addHighIntentAlert(alert)
       }
-      useChatStore.getState().addHighIntentAlert(alert)
-    }
 
-    if (data.type === 'session_update') {
-      fetchSessions()
-        .then((result) => {
-          if (result.sessions) useChatStore.getState().setSessions(result.sessions)
-        })
-        .catch(() => {})
-
-      // Catch-up: replace from authoritative history; IDs make this deterministic.
-      const activeId = activeSessionIdRef.current
-      if (activeId && data.session_id === activeId) {
-        getChatMessages(activeId)
-          .then((data) => {
-            const serverMsgs: ChatMessage[] = (data.messages || []).map((m: any) => ({
-              id: String(m.id),
-              role: m.role,
-              content: m.content,
-              timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
-              status: 'sent',
-            }))
-            setSessionMessages(activeId, serverMsgs)
+      if (data.type === 'session_update') {
+        fetchSessions()
+          .then((result) => {
+            if (result.sessions) useChatStore.getState().setSessions(result.sessions)
           })
           .catch(() => {})
+
+        // Catch-up: replace from authoritative history; IDs make this deterministic.
+        const activeId = activeSessionIdRef.current
+        if (activeId && data.session_id === activeId) {
+          getChatMessages(activeId)
+            .then((data) => {
+              setSessionMessages(activeId, (data.messages || []).map(apiMessageToChatMessage))
+            })
+            .catch(() => {})
+        }
       }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appendSessionMessage, attachDocuments, attachImages, setSessionMessages])
+    },
+    [appendSessionMessage, attachDocuments, attachImages, setSessionMessages],
+  )
 
   const handleWsConnected = useCallback(() => {
-    console.log('[B-WS] connected, refreshing sessions and active history')
     fetchSessions()
       .then((result) => useChatStore.getState().setSessions(result.sessions || []))
-      .catch((error) => console.error('[B-WS] session refresh failed:', error))
+      .catch(() => {})
     const activeId = activeSessionIdRef.current
     if (activeId && activeId !== 'hermes') {
       getChatMessages(activeId)
-        .then((data) => setSessionMessages(
-          activeId,
-          (data.messages || []).map((m: any) => ({
-            id: String(m.id),
-            role: m.role,
-            content: m.content,
-            timestamp: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
-            status: 'sent' as const,
-          })),
-        ))
-        .catch((error) => console.error('[B-WS] history refresh failed:', error))
+        .then((data) => setSessionMessages(activeId, (data.messages || []).map(apiMessageToChatMessage)))
+        .catch(() => {})
     }
   }, [setSessionMessages])
 
-  useWebSocket('admin', handleWsMessage, handleWsConnected)
+  const { wsStatus } = useWebSocket('admin', handleWsMessage, handleWsConnected)
   // 注意: B端只监听 admin 广播通道，不监听会话专属WS（避免重复处理）
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || null
   const localMessages = activeSessionId ? (sessionMessages[activeSessionId] || []) : []
-  const status = activeSession ? statusConfig[activeSession.status] : null
+  const status = activeSession ? statusConfig[normalizeStatus(activeSession.status)] : null
   const currentHandoverMode = activeSessionId ? (handoverModes[activeSessionId] || 'ai') : 'ai'
-
-  // Find the alert for the current session (if any)
-  const activeAlert = highIntentAlerts.find((a) => a.session_id === activeSessionId)
 
   return (
     <>
+      {/* 实时连接状态提示 */}
+      {(wsStatus === 'closed' || wsStatus === 'error') && (
+        <div className="shrink-0 bg-amber-50 px-4 py-1.5 text-center text-xs text-amber-800" role="status">
+          实时连接已断开，正在重连…
+        </div>
+      )}
+
       {/* High Intent Alert Overlay */}
       {highIntentAlerts.length > 0 && (
         <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm">
           {highIntentAlerts.map((alert) => (
             <div
               key={alert.session_id}
-              className="rounded-lg border border-amber-300 bg-gradient-to-r from-amber-50 to-orange-50 p-4 shadow-lg animate-in slide-in-from-right"
+              className="rounded-lg border border-amber-300 bg-gradient-to-r from-amber-50 to-orange-50 p-4 shadow-lg"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-start gap-2.5">
@@ -343,6 +328,7 @@ export default function ChatContent() {
                 </div>
                 <button
                   onClick={() => handleDismiss(alert.session_id)}
+                  aria-label="关闭提醒"
                   className="shrink-0 text-amber-400 hover:text-amber-600 transition-colors"
                 >
                   <X size={14} />
@@ -359,7 +345,6 @@ export default function ChatContent() {
           sessions={sessions}
           activeId={activeSessionId}
           onSelect={handleSelectSession}
-          onNewSession={handleNewSession}
           isLoading={sessionLoading}
         />
       </div>
@@ -470,13 +455,12 @@ export default function ChatContent() {
           {activeSessionId === 'hermes' ? (
             <HermesChatArea />
           ) : (
-            <ChatView onSend={handleAdminSend} messages={localMessages} />
+            <ChatView onSend={(content) => handleAdminSend(content)} messages={localMessages} />
           )}
 
           {/* AI Suggestion floating panel (human mode) */}
           {currentHandoverMode === 'human' && (
             <div className="absolute bottom-0 left-0 right-0 z-10">
-              {/* Trigger bar */}
               {!showSuggestPanel && (
                 <div className="flex justify-center pb-2">
                   <button
@@ -489,7 +473,6 @@ export default function ChatContent() {
                 </div>
               )}
 
-              {/* Suggestions panel */}
               {showSuggestPanel && (
                 <div className="border-t border-neutral-100 bg-white p-3 shadow-sm">
                   <div className="flex items-center justify-between mb-2">
@@ -523,7 +506,6 @@ export default function ChatContent() {
                         <button
                           key={i}
                           onClick={() => {
-                            // Dispatch a custom event to fill the ChatView input
                             window.dispatchEvent(new CustomEvent('fill-chat-input', { detail: s }))
                           }}
                           className="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-left text-xs text-neutral-700 hover:bg-amber-50 hover:border-amber-200 transition-colors"
@@ -543,7 +525,11 @@ export default function ChatContent() {
       {/* Right Panel: Customer Info */}
       {panelVisible && (
         <div className="w-72 shrink-0 overflow-hidden border-l border-neutral-200 transition-all duration-200">
-          <CustomerInfoPanel session={activeSession} onClose={() => setPanelVisible(false)} />
+          <CustomerInfoPanel
+            session={activeSession}
+            onClose={() => setPanelVisible(false)}
+            onStatusChange={handleStatusChange}
+          />
         </div>
       )}
     </>

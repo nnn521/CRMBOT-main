@@ -33,7 +33,7 @@ export default function HistoryPage() {
   return (
     <div className="min-h-screen bg-neutral-50">
       <header className="sticky top-0 z-10 border-b border-neutral-200 bg-white px-4 py-3">
-        <div className="mx-auto flex max-w-2xl items-center gap-3"><button type="button" onClick={() => navigate('/chat')} title="返回"><ArrowLeft /></button><h1 className="font-semibold">对话历史</h1></div>
+        <div className="mx-auto flex max-w-2xl items-center gap-3"><button type="button" onClick={() => navigate('/chat')} aria-label="返回聊天" title="返回"><ArrowLeft /></button><h1 className="font-semibold">对话历史</h1></div>
       </header>
       <main className="mx-auto max-w-2xl p-4">
         <label className="flex h-11 items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3"><Search size={18} className="text-neutral-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索对话内容" className="flex-1 bg-transparent text-sm outline-none" /></label>

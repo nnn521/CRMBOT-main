@@ -60,6 +60,12 @@ class SalesState(TypedDict):
     # RAG 检索结果
     knowledge_results: List[Dict[str, Any]]
     images: List[str]
+    citations: List[Dict[str, Any]]
+    knowledge_release_id: Optional[str]
+    answer_status: Optional[str]
+    data_as_of: Optional[str]
+    assumptions: List[str]
+    limitations: List[str]
     
     # 文档生成相关
     document_params: Optional[Dict[str, Any]]
@@ -177,6 +183,12 @@ def create_initial_state(
         context=context if context is not None else {},
         knowledge_results=[],
         images=[],
+        citations=[],
+        knowledge_release_id=None,
+        answer_status=None,
+        data_as_of=None,
+        assumptions=[],
+        limitations=[],
         generated_documents=[],
         sales_response=None,
         suggested_actions=[],

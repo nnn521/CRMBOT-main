@@ -46,3 +46,49 @@
 {"timestamp": "2026-07-13T10:49:31.595919+00:00", "level": "WARNING", "logger": "sales_ai_agent.response_node", "message": "[Complaint] LLM 调用失败，回退到 YAML 模板: LLM offline"}
 {"timestamp": "2026-07-13T10:49:31.598011+00:00", "level": "WARNING", "logger": "sales_ai_agent.response_node", "message": "[Complaint] LLM 调用失败，回退到 YAML 模板: LLM offline"}
 {"timestamp": "2026-07-13T10:49:31.600033+00:00", "level": "WARNING", "logger": "sales_ai_agent.response_node", "message": "[Complaint] LLM 调用失败，回退到 YAML 模板: LLM offline"}
+2026-10-19 18:44:52,983 - sales_ai_agent.knowledge_node - INFO - [KB] 初始化 Embedding 模型: bge-m3
+2026-10-19 18:44:52,984 - sales_ai_agent.knowledge_node - INFO - [KB] Production mode: skip pickle index, rebuild from knowledge_base
+2026-10-19 18:44:52,984 - sales_ai_agent.knowledge_node - INFO - [KB] 扫描目录，发现 1 个文件
+2026-10-19 18:44:52,984 - sales_ai_agent.knowledge_node - INFO - [KB] 成功加载文件: a.md (1 个文档, 编码: utf-8)
+2026-10-19 18:44:52,984 - sales_ai_agent.knowledge_node - INFO - [KB] 文档加载完成: 1 个文档
+2026-10-19 18:44:52,985 - sales_ai_agent.knowledge_node - INFO - [KB] 文档切片完成: 1 个原始文档 -> 1 个文本块
+2026-10-19 18:44:53,099 - sales_ai_agent.knowledge_node - INFO - [KB] 向量存储创建成功，包含 1 个向量
+2026-10-19 18:44:53,101 - sales_ai_agent.knowledge_node - INFO - [KB] 文档快照已写入: C:\Users\NNNN521\AppData\Local\Temp\tmp0ggqq3ds\vs\kb_documents.json (1 块)
+2026-10-19 18:44:53,103 - sales_ai_agent.knowledge_node - INFO - [KB] 初始化 Embedding 模型: bge-m3
+2026-10-19 18:44:53,103 - sales_ai_agent.knowledge_node - INFO - [KB] 已读取文档快照: 1 块
+2026-10-19 18:44:53,104 - sales_ai_agent.knowledge_node - INFO - [KB] 文档切片完成: 1 个原始文档 -> 1 个文本块
+2026-10-19 18:44:53,104 - sales_ai_agent.knowledge_node - INFO - [KB] 向量存储创建成功，包含 1 个向量
+2026-10-19 18:44:53,105 - sales_ai_agent.knowledge_node - INFO - [KB] 已从 JSON 快照重建向量库（无需危险反序列化）
+2026-10-19 18:44:53,107 - sales_ai_agent.knowledge_node - INFO - [KB] 执行检索: query='凯美瑞多少钱...', top_k=2
+2026-10-19 18:44:53,107 - sales_ai_agent.knowledge_node - ERROR - [KB] 知识库检索失败: 'FakeOllama' object is not callable
+2026-10-19 18:45:05,816 - sales_ai_agent.knowledge_node - INFO - [KB] 初始化 Embedding 模型: bge-m3
+2026-10-19 18:45:05,816 - sales_ai_agent.knowledge_node - INFO - [KB] Production mode: skip pickle index, rebuild from knowledge_base
+2026-10-19 18:45:05,816 - sales_ai_agent.knowledge_node - INFO - [KB] 扫描目录，发现 1 个文件
+2026-10-19 18:45:05,816 - sales_ai_agent.knowledge_node - INFO - [KB] 成功加载文件: a.md (1 个文档, 编码: utf-8)
+2026-10-19 18:45:05,816 - sales_ai_agent.knowledge_node - INFO - [KB] 文档加载完成: 1 个文档
+2026-10-19 18:45:05,816 - sales_ai_agent.knowledge_node - INFO - [KB] 文档切片完成: 1 个原始文档 -> 1 个文本块
+2026-10-19 18:45:05,891 - sales_ai_agent.knowledge_node - INFO - [KB] 向量存储创建成功，包含 1 个向量
+2026-10-19 18:45:05,892 - sales_ai_agent.knowledge_node - INFO - [KB] 文档快照已写入: C:\Users\NNNN521\AppData\Local\Temp\tmpp_8pew0h\vs\kb_documents.json (1 块)
+2026-10-19 18:45:05,894 - sales_ai_agent.knowledge_node - INFO - [KB] 执行检索: query='凯美瑞多少钱...', top_k=2
+2026-10-19 18:45:05,897 - sales_ai_agent.knowledge_node - INFO - [KB] 检索完成: 原始 1 条, 过滤后 0 条
+2026-10-19 18:45:05,898 - sales_ai_agent.knowledge_node - INFO - [KB] 初始化 Embedding 模型: bge-m3
+2026-10-19 18:45:05,899 - sales_ai_agent.knowledge_node - INFO - [KB] 已读取文档快照: 1 块
+2026-10-19 18:45:05,899 - sales_ai_agent.knowledge_node - INFO - [KB] 文档切片完成: 1 个原始文档 -> 1 个文本块
+2026-10-19 18:45:05,899 - sales_ai_agent.knowledge_node - INFO - [KB] 向量存储创建成功，包含 1 个向量
+2026-10-19 18:45:05,900 - sales_ai_agent.knowledge_node - INFO - [KB] 已从 JSON 快照重建向量库（无需危险反序列化）
+2026-10-19 18:45:05,901 - sales_ai_agent.knowledge_node - INFO - [KB] 执行检索: query='汉兰达...', top_k=2
+2026-10-19 18:45:05,901 - sales_ai_agent.knowledge_node - INFO - [KB] 检索完成: 原始 1 条, 过滤后 0 条
+2026-10-19 18:45:18,508 - sales_ai_agent.knowledge_node - INFO - [KB] 初始化 Embedding 模型: bge-m3
+2026-10-19 18:45:18,509 - sales_ai_agent.knowledge_node - INFO - [KB] Production mode: skip pickle index, rebuild from knowledge_base
+2026-10-19 18:45:18,509 - sales_ai_agent.knowledge_node - INFO - [KB] 扫描目录，发现 1 个文件
+2026-10-19 18:45:18,509 - sales_ai_agent.knowledge_node - INFO - [KB] 成功加载文件: a.md (1 个文档, 编码: utf-8)
+2026-10-19 18:45:18,509 - sales_ai_agent.knowledge_node - INFO - [KB] 文档加载完成: 1 个文档
+2026-10-19 18:45:18,509 - sales_ai_agent.knowledge_node - INFO - [KB] 文档切片完成: 1 个原始文档 -> 1 个文本块
+2026-10-19 18:45:18,587 - sales_ai_agent.knowledge_node - INFO - [KB] 向量存储创建成功，包含 1 个向量
+2026-10-19 18:45:18,588 - sales_ai_agent.knowledge_node - INFO - [KB] 文档快照已写入: C:\Users\NNNN521\AppData\Local\Temp\tmp7d7etok3\vs\kb_documents.json (1 块)
+2026-10-20 16:21:31,953 - sales_ai_agent.main - INFO - 🚀 智能销售 AI Agent v1.0.0 启动中...
+2026-10-20 16:24:34,510 - sales_ai_agent.main - INFO - 🚀 智能销售 AI Agent v1.0.0 启动中...
+2026-10-20 16:24:34,782 - sales_ai_agent.sales_graph - INFO - [Init] 开始初始化 PostgreSQL 数据库...
+2026-10-20 16:24:34,783 - sales_ai_agent.sales_graph - ERROR - [Init] 数据库初始化失败: Psycopg cannot use the 'ProactorEventLoop' to run in async mode. Please use a compatible event loop, for instance by running 'asyncio.run(..., loop_factory=asyncio.SelectorEventLoop(selectors.SelectSelector()))'
+2026-10-20 16:24:34,783 - sales_ai_agent.main - WARNING - ⚠️ 数据库未完全初始化，Agent 将使用内存存储
+2026-10-20 16:24:34,787 - sales_ai_agent.main - WARNING - ⚠️ environment=development 且 DEBUG=false：FAISS 允许危险反序列化。生产环境请设置 ENVIRONMENT=production

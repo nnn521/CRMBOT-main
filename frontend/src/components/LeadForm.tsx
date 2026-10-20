@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { CheckCircle2, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { submitLead } from '@/api/engagement'
 
@@ -16,6 +16,18 @@ export default function LeadForm({ open, sessionId, initialModel = '', onClose }
   const [submitting, setSubmitting] = useState(false)
   const [coupon, setCoupon] = useState('')
   const phoneValid = useMemo(() => /^1[3-9]\d{9}$/.test(form.phone), [form.phone])
+  const firstFieldRef = useRef<HTMLInputElement>(null)
+
+  // Escape 关闭 + 初始焦点
+  useEffect(() => {
+    if (!open) return
+    firstFieldRef.current?.focus()
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [open, onClose])
 
   if (!open) return null
 
@@ -46,7 +58,7 @@ export default function LeadForm({ open, sessionId, initialModel = '', onClose }
       <div className="w-full max-w-md rounded-t-lg bg-white p-5 shadow-xl sm:rounded-lg">
         <div className="flex items-start justify-between">
           <div><h2 className="text-base font-semibold">获取专属购车服务</h2><p className="mt-1 text-xs text-neutral-500">留下需求，销售顾问将尽快联系您</p></div>
-          <button type="button" onClick={onClose} className="text-neutral-400 hover:text-neutral-700" title="关闭"><X size={20} /></button>
+          <button type="button" onClick={onClose} aria-label="关闭" className="text-neutral-400 hover:text-neutral-700" title="关闭"><X size={20} /></button>
         </div>
 
         {coupon ? (
@@ -62,7 +74,7 @@ export default function LeadForm({ open, sessionId, initialModel = '', onClose }
               {[1, 2, 3].map((item) => <span key={item} className={`h-1.5 flex-1 rounded-full ${item <= step ? 'bg-amber-500' : 'bg-neutral-200'}`} />)}
             </div>
             <div className="min-h-48 space-y-3">
-              {step === 1 && <><Field label="姓名" value={form.name} onChange={(name) => setForm({ ...form, name })} required /><Field label="手机号" value={form.phone} onChange={(phone) => setForm({ ...form, phone })} inputMode="tel" required /></>}
+              {step === 1 && <><Field label="姓名" value={form.name} onChange={(name) => setForm({ ...form, name })} required fieldRef={firstFieldRef} /><Field label="手机号" value={form.phone} onChange={(phone) => setForm({ ...form, phone })} inputMode="tel" required /></>}
               {step === 2 && <><Field label="意向车型" value={form.car_model} onChange={(car_model) => setForm({ ...form, car_model })} /><label className="block text-sm">预算范围<select value={form.budget_range} onChange={(event) => setForm({ ...form, budget_range: event.target.value })} className="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3"><option value="">请选择</option><option>15万以内</option><option>15-25万</option><option>25-40万</option><option>40万以上</option></select></label></>}
               {step === 3 && <><label className="block text-sm">预计购买时间<select value={form.purchase_time} onChange={(event) => setForm({ ...form, purchase_time: event.target.value })} className="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3"><option value="">请选择</option><option>1个月内</option><option>1-3个月</option><option>3-6个月</option><option>暂未确定</option></select></label><label className="block text-sm">备注<textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} className="mt-1 min-h-20 w-full rounded-md border border-neutral-300 p-3" /></label></>}
             </div>
@@ -78,6 +90,6 @@ export default function LeadForm({ open, sessionId, initialModel = '', onClose }
   )
 }
 
-function Field({ label, value, onChange, required, inputMode }: { label: string; value: string; onChange: (value: string) => void; required?: boolean; inputMode?: 'tel' }) {
-  return <label className="block text-sm">{label}{required && <span className="text-red-500"> *</span>}<input value={value} onChange={(event) => onChange(event.target.value)} inputMode={inputMode} className="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3 outline-none focus:border-amber-500" /></label>
+function Field({ label, value, onChange, required, inputMode, fieldRef }: { label: string; value: string; onChange: (value: string) => void; required?: boolean; inputMode?: 'tel'; fieldRef?: React.Ref<HTMLInputElement> }) {
+  return <label className="block text-sm">{label}{required && <span className="text-red-500"> *</span>}<input ref={fieldRef} value={value} onChange={(event) => onChange(event.target.value)} inputMode={inputMode} className="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3 outline-none focus:border-amber-500" /></label>
 }

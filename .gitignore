@@ -22,12 +22,18 @@ frontend/dist/
 .env
 
 # Output files
-backend/output/*.xlsx
-backend/output/*.docx
-backend/output/*.txt
+backend/output/
+backend/app.log
 
 # Data / vector store
 backend/data/vector_store/
+
+# 沙盒依赖引导产物（不入库）
+.tmp/
+.pipcache/
+wheels/
+backend/pylib/
+backend/.venv/
 
 # OS
 .DS_Store
