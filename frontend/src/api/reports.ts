@@ -1,13 +1,4 @@
-const API_BASE = '/api/v1'
-
-function authHeaders(): Record<string, string> {
-  const token = localStorage.getItem('crmbot_token')
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
-  return headers
-}
+import { apiFetch } from '@/lib/api'
 
 /* ── Dashboard 聚合数据 ── */
 
@@ -47,9 +38,7 @@ export interface DashboardData {
 }
 
 export async function fetchDashboard(): Promise<DashboardData> {
-  const res = await fetch(`${API_BASE}/reports/dashboard`, { headers: authHeaders() })
-  if (!res.ok) throw new Error(`Dashboard API error: ${res.status}`)
-  return res.json()
+  return apiFetch('/reports/dashboard')
 }
 
 /* ── 成交记录 ── */
@@ -62,20 +51,15 @@ export interface DealRecord {
 }
 
 export async function fetchDeals(limit = 10): Promise<DealRecord[]> {
-  const res = await fetch(`${API_BASE}/reports/deals?limit=${limit}`, { headers: authHeaders() })
-  if (!res.ok) throw new Error(`Deals API error: ${res.status}`)
-  return res.json()
+  return apiFetch(`/reports/deals?limit=${limit}`)
 }
 
 /* ── AI 分析 ── */
 
 export async function analyzeReport(data: string): Promise<string> {
-  const res = await fetch(`${API_BASE}/reports/analyze`, {
+  const result = await apiFetch<{ analysis: string }>('/reports/analyze', {
     method: 'POST',
-    headers: authHeaders(),
     body: JSON.stringify({ data }),
   })
-  if (!res.ok) throw new Error(`Analyze API error: ${res.status}`)
-  const result = await res.json()
   return result.analysis
 }

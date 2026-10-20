@@ -454,6 +454,27 @@ async def intent_recognition_node(state: SalesState) -> SalesState:
         state["context"] = state.get("context", {})
         return strip_messages(state)
     
+    if settings.rag_v2_enabled and not input_image_url:
+        from app.services.knowledge.tool_routing import is_tool_query
+
+        # Knowledge questions do not need a paid classification call. Keep the
+        # existing document flow only for an explicit request or pending input.
+        document_request = any(word in user_message.lower() for word in (
+            "报价单", "价格单", "合同", "协议", "提案", "方案书", "建议书", "报表", "ppt", "文档",
+        ))
+        pending_document = bool((state.get("document_params") or {}).get("flow_active"))
+        # Complaints must reach the dedicated handler; product evidence would not
+        # resolve them and generic model reassurance would be unsupported.
+        complaint = any(word in user_message for word in ("投诉", "退款", "不满意", "举报", "维权", "差评"))
+        if not complaint and (is_tool_query(user_message) or not (document_request or pending_document)):
+            state["intent_analysis"] = IntentAnalysisResult(
+                intent=UserIntent.PRODUCT_INQUIRY, confidence=1.0, entities={},
+                reasoning="知识服务与受约束工具规则路由", high_intent=False,
+            )
+            _update_document_flow(state, UserIntent.PRODUCT_INQUIRY, user_message)
+            state["next_node"] = "knowledge_retrieval"
+            return strip_messages(state)
+
     # ═══ 调用 LLM 进行意图识别 ═══
     try:
         llm = ChatOpenAI(

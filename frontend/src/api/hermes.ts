@@ -1,14 +1,3 @@
-const API_BASE = '/api/v1/hermes'
-
-function authHeaders(): Record<string, string> {
-  const token = localStorage.getItem('crmbot_token')
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
-  return headers
-}
-
 export interface HermesHealthResponse {
   online: boolean
   status_code?: number
@@ -20,95 +9,51 @@ export interface HermesMessage {
   content: string
 }
 
-export interface HermesChatResponse {
-  id: string
-  object: string
-  created: number
-  model: string
-  choices: Array<{
-    index: number
-    message: HermesMessage
-    finish_reason: string
-  }>
-}
-
 /** 检测 Hermes 是否在线 */
 export async function checkHermesHealth(): Promise<HermesHealthResponse> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 8000)
-
   try {
-    const res = await fetch(`${API_BASE}/health`, {
-      headers: authHeaders(),
+    const res = await fetch('/api/v1/hermes/health', {
+      headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
     })
-    clearTimeout(timeout)
     if (!res.ok) {
       return { online: false, status_code: res.status, detail: `HTTP ${res.status}` }
     }
-    return res.json()
+    return (await res.json()) as HermesHealthResponse
   } catch (err: unknown) {
-    clearTimeout(timeout)
     if (err instanceof DOMException && err.name === 'AbortError') {
       return { online: false, detail: '连接超时' }
     }
     return { online: false, detail: '无法连接到 Hermes 服务' }
+  } finally {
+    clearTimeout(timeout)
   }
 }
 
-/** 发送消息到 Hermes（非流式） */
-export async function sendHermesMessage(
-  messages: HermesMessage[]
-): Promise<HermesChatResponse> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 60000)
-
-  try {
-    const res = await fetch(`${API_BASE}/chat`, {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({ messages }),
-      signal: controller.signal,
-    })
-    clearTimeout(timeout)
-
-    if (!res.ok) {
-      const errorText = await res.text().catch(() => '')
-      throw new Error(`Hermes API error (${res.status}): ${errorText}`)
-    }
-    return res.json()
-  } catch (err: unknown) {
-    clearTimeout(timeout)
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('请求超时，Hermes 可能负载过高，请稍后重试')
-    }
-    if (err instanceof TypeError && err.message.includes('fetch')) {
-      throw new Error('网络连接失败，请检查 Hermes 服务是否正常运行')
-    }
-    throw err
-  }
-}
-
-/** 流式发送消息到 Hermes（SSE），返回 reader */
+/** 流式发送消息到 Hermes（SSE） */
 export async function sendHermesMessageStream(
   messages: HermesMessage[],
   onChunk: (text: string) => void,
   onDone: () => void,
   onError: (error: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<void> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 120000)
-  // 外部 signal 联动：外部取消时内部也取消
   if (signal) {
-    if (signal.aborted) { controller.abort(); return }
+    if (signal.aborted) {
+      controller.abort()
+      return
+    }
     signal.addEventListener('abort', () => controller.abort(), { once: true })
   }
 
   try {
-    const res = await fetch(`${API_BASE}/chat/stream`, {
+    const res = await fetch('/api/v1/hermes/chat/stream', {
       method: 'POST',
-      headers: authHeaders(),
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages }),
       signal: controller.signal,
     })
@@ -136,7 +81,6 @@ export async function sendHermesMessageStream(
 
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n')
-      // Keep the last partial line in buffer
       buffer = lines.pop() || ''
 
       for (const line of lines) {
@@ -150,26 +94,29 @@ export async function sendHermesMessageStream(
         }
 
         try {
-          const parsed = JSON.parse(data)
-          const content = parsed.choices?.[0]?.delta?.content
-          if (content) {
-            onChunk(content)
+          const parsed = JSON.parse(data) as {
+            choices?: Array<{ delta?: { content?: string } }>
           }
+          const content = parsed.choices?.[0]?.delta?.content
+          if (content) onChunk(content)
         } catch {
-          // Skip unparseable SSE data
+          /* 跳过无法解析的 SSE 数据 */
         }
       }
     }
 
-    // Flush any remaining buffer
     if (buffer.trim()) {
       const trimmed = buffer.trim()
       if (trimmed.startsWith('data: ') && trimmed.slice(6) !== '[DONE]') {
         try {
-          const parsed = JSON.parse(trimmed.slice(6))
+          const parsed = JSON.parse(trimmed.slice(6)) as {
+            choices?: Array<{ delta?: { content?: string } }>
+          }
           const content = parsed.choices?.[0]?.delta?.content
           if (content) onChunk(content)
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
     }
 

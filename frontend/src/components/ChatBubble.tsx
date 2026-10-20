@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { AlertCircle, Bot, Check, Download, ImageOff, Loader2, User, X } from 'lucide-react'
-import type { ChatMessage } from '@/types'
+import type { ChatMessage, CitationInfo } from '@/types'
 
 interface Props {
   message: ChatMessage
@@ -9,7 +9,7 @@ interface Props {
   images?: string[]
 }
 
-export default function ChatBubble({ message, reversed, images }: Props) {
+export function ChatBubble({ message, reversed, images }: Props) {
   const isUser = message.role === 'user'
   const alignLeft = reversed ? !isUser : isUser
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
@@ -51,6 +51,8 @@ export default function ChatBubble({ message, reversed, images }: Props) {
             {isUser && <MessageStatus status={message.status} />}
           </div>
         </div>
+
+        {!isUser && <AnswerDetails message={message} />}
 
         {allImages.length > 0 && (
           <div className={`mt-2 grid w-full gap-2 ${allImages.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
@@ -94,6 +96,68 @@ export default function ChatBubble({ message, reversed, images }: Props) {
         </div>
       )}
     </div>
+  )
+}
+
+export default ChatBubble
+
+const answerStatusLabels = {
+  answered: '已回答',
+  partial: '部分回答',
+  clarification: '需要补充信息',
+  unavailable: '暂无法确认',
+}
+
+/** Defense in depth for legacy history: only link to authenticated citation JSON. */
+function citationHref(citation: CitationInfo): string | undefined {
+  try {
+    let decoded = citation.url
+    for (let index = 0; index < 8; index += 1) {
+      const next = decodeURIComponent(decoded)
+      if (next === decoded) break
+      decoded = next
+    }
+    if (!/^\/api\/v1\/knowledge\/releases\/[^/\\?#\s%]+\/citations\/[^/\\?#\s%]+$/.test(decoded)) return undefined
+    if (decoded.split('/').some((part) => part === '.' || part === '..')) return undefined
+    return citation.url
+  } catch {
+    return undefined
+  }
+}
+
+function AnswerDetails({ message }: { message: ChatMessage }) {
+  const hasDetails = message.citations?.length || message.answer_status || message.knowledge_release_id || message.data_as_of || message.assumptions?.length || message.limitations?.length
+  if (!hasDetails) return null
+  return (
+    <section aria-label="回答依据与条件" className="mt-2 w-full space-y-2 rounded-lg border border-neutral-200 bg-white p-3 text-xs text-neutral-700">
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-neutral-500">
+        {message.answer_status && <span>{answerStatusLabels[message.answer_status]}</span>}
+        {message.data_as_of && <span>数据截至：{message.data_as_of}</span>}
+        {message.knowledge_release_id && <span className="break-all">知识版本：{message.knowledge_release_id}</span>}
+      </div>
+      {message.citations?.map((citation) => {
+        const href = citationHref(citation)
+        return (
+          <details key={citation.citation_id} className="rounded border border-neutral-100 px-2 py-1.5">
+            <summary className="cursor-pointer break-words font-medium">{citation.title || citation.source_id}</summary>
+            <blockquote className="mt-2 whitespace-pre-wrap break-words border-l-2 border-amber-300 pl-2">{citation.quote}</blockquote>
+            <dl className="mt-2 space-y-1 text-neutral-500">
+              <div><dt className="inline">文档版本：</dt><dd className="inline break-all">{citation.document_version}</dd></div>
+              {Object.entries(citation.locator).map(([key, value]) => (
+                <div key={key}><dt className="inline">{key}：</dt><dd className="inline whitespace-pre-wrap break-all">{typeof value === 'string' ? value : JSON.stringify(value)}</dd></div>
+              ))}
+            </dl>
+            {href && <a href={href} target="_blank" rel="noreferrer" className="mt-2 inline-block underline underline-offset-2">查看来源详情</a>}
+          </details>
+        )
+      })}
+      {!!message.assumptions?.length && (
+        <div><p className="font-medium">适用条件</p><ul className="mt-1 list-disc space-y-1 pl-4">{message.assumptions.map((item, index) => <li key={index} className="whitespace-pre-wrap break-words">{item}</li>)}</ul></div>
+      )}
+      {!!message.limitations?.length && (
+        <div><p className="font-medium">限制说明</p><ul className="mt-1 list-disc space-y-1 pl-4">{message.limitations.map((item, index) => <li key={index} className="whitespace-pre-wrap break-words">{item}</li>)}</ul></div>
+      )}
+    </section>
   )
 }
 

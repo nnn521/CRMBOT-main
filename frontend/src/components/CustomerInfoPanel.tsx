@@ -1,10 +1,15 @@
+import { useState } from 'react'
 import { X, Calendar, FileText, Clock } from 'lucide-react'
+import { normalizeStatus, type SessionStatus } from '@/api/sessions'
 import type { Session } from '@/types'
 
 interface Props {
   session: Session | null
   onClose: () => void
+  onStatusChange: (sessionId: string, status: SessionStatus) => Promise<void>
 }
+
+const STATUS_OPTIONS: SessionStatus[] = ['new', 'active', 'negotiating', 'closed', 'lost']
 
 const statusConfig: Record<Session['status'], { label: string; className: string }> = {
   new: { label: '待跟进', className: 'bg-amber-50 text-amber-800 border-amber-200' },
@@ -19,13 +24,15 @@ function formatDateTime(iso: string): string {
   return `${d.getFullYear()}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getDate().toString().padStart(2, '0')} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
 }
 
-export default function CustomerInfoPanel({ session, onClose }: Props) {
+export default function CustomerInfoPanel({ session, onClose, onStatusChange }: Props) {
+  const [savingStatus, setSavingStatus] = useState(false)
+
   if (!session) {
     return (
       <div className="flex h-full flex-col bg-white">
         <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-100">
           <h3 className="text-sm font-semibold text-neutral-700">客户档案</h3>
-          <button onClick={onClose} className="rounded p-1 hover:bg-neutral-100 transition-colors">
+          <button onClick={onClose} aria-label="关闭面板" className="rounded p-1 hover:bg-neutral-100 transition-colors">
             <X size={15} className="text-neutral-400" strokeWidth={1.5} />
           </button>
         </div>
@@ -38,14 +45,26 @@ export default function CustomerInfoPanel({ session, onClose }: Props) {
     )
   }
 
-  const status = statusConfig[session.status]
+  const status = statusConfig[normalizeStatus(session.status)]
+  const sessionId = session.id
+  const currentStatus = normalizeStatus(session.status)
+
+  async function handleStatusChange(next: SessionStatus) {
+    if (next === currentStatus || savingStatus) return
+    setSavingStatus(true)
+    try {
+      await onStatusChange(sessionId, next)
+    } finally {
+      setSavingStatus(false)
+    }
+  }
 
   return (
     <div className="flex h-full flex-col bg-white">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-100">
         <h3 className="text-sm font-semibold text-neutral-700">客户档案</h3>
-        <button onClick={onClose} className="rounded p-1 hover:bg-neutral-100 transition-colors">
+        <button onClick={onClose} aria-label="关闭面板" className="rounded p-1 hover:bg-neutral-100 transition-colors">
           <X size={15} className="text-neutral-400" strokeWidth={1.5} />
         </button>
       </div>
@@ -88,11 +107,19 @@ export default function CustomerInfoPanel({ session, onClose }: Props) {
               </div>
               <div className="flex items-center gap-2 text-xs">
                 <span className="text-neutral-400 w-12 shrink-0">状态</span>
-                <span
-                  className={`inline-flex items-center rounded border px-1.5 py-0 text-[10px] font-medium ${status.className}`}
+                <select
+                  value={normalizeStatus(session.status)}
+                  onChange={(event) => handleStatusChange(event.target.value as SessionStatus)}
+                  disabled={savingStatus}
+                  className="rounded border border-neutral-200 bg-white px-1.5 py-0.5 text-xs text-neutral-700 outline-none disabled:opacity-50"
+                  aria-label="更新会话状态"
                 >
-                  {status.label}
-                </span>
+                  {STATUS_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {statusConfig[option].label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>
@@ -122,13 +149,9 @@ export default function CustomerInfoPanel({ session, onClose }: Props) {
 
           {/* Actions */}
           <div className="px-4 py-3 space-y-2">
-            <button className="flex items-center justify-center gap-1.5 w-full rounded-lg bg-black px-3 py-2 text-xs font-medium text-white hover:bg-neutral-800 transition-colors">
-              <FileText size={13} strokeWidth={1.5} />
-              创建报价单
-            </button>
-            <button className="flex items-center justify-center gap-1.5 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs font-medium text-neutral-600 hover:bg-neutral-50 transition-colors">
-              安排试驾
-            </button>
+            <p className="text-[11px] leading-relaxed text-neutral-400">
+              状态流转会实时反映在报表漏斗中：洽谈中 → 已成交/已流失。
+            </p>
           </div>
         </div>
       </div>

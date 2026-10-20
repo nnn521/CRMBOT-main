@@ -14,6 +14,7 @@ from sqlalchemy import text
 
 from app.api.v1 import chat_router, documents_router, images_router, ws_router, auth_router, reports_router, hermes_router, engagement_router
 from app.api.v1.auth import ensure_users_table
+from app.api.v1.knowledge import router as knowledge_router, readiness as knowledge_readiness
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.agents.graphs.sales_graph import initialize_database, close_database
@@ -74,6 +75,15 @@ app.include_router(auth_router, prefix=settings.api_v1_prefix)
 app.include_router(reports_router, prefix=settings.api_v1_prefix)
 app.include_router(hermes_router, prefix=settings.api_v1_prefix)
 app.include_router(engagement_router, prefix=settings.api_v1_prefix)
+app.include_router(knowledge_router, prefix=settings.api_v1_prefix)
+
+
+@app.get("/ready")
+async def ready():
+    knowledge = await knowledge_readiness()
+    return JSONResponse(status_code=200 if knowledge["ready"] else 503,
+                        content={"status": "ready" if knowledge["ready"] else "unavailable",
+                                 "knowledge": knowledge})
 
 
 @app.get("/")

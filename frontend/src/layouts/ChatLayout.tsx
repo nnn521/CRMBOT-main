@@ -7,6 +7,8 @@ import {
   Settings,
   LogOut,
 } from 'lucide-react'
+import { logout } from '@/api/chat'
+import { useChatStore } from '@/stores/chat'
 
 const NAV_ITEMS = [
   { icon: MessageSquare, label: '消息', path: '/' },
@@ -25,9 +27,10 @@ export default function ChatLayout() {
     return location.pathname.startsWith(path)
   }
 
-  function handleLogout() {
-    localStorage.removeItem('crmbot_token')
+  async function handleLogout() {
+    await logout()
     localStorage.removeItem('crmbot_user')
+    useChatStore.getState().refreshSessionId()
     navigate('/login', { replace: true })
   }
 
@@ -60,6 +63,7 @@ export default function ChatLayout() {
         {/* Logout */}
         <button
           onClick={handleLogout}
+          aria-label="退出登录"
           className="flex w-full flex-col items-center gap-1 py-1.5 text-neutral-500 hover:text-white transition-colors"
           title="退出登录"
         >

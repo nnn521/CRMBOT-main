@@ -461,6 +461,12 @@ def _sanitize_final_state(state: Any, session_id: str) -> Dict[str, Any]:
         # 知识检索结果
         "knowledge_results": _safe_get_list(state, "knowledge_results"),
         "images": _safe_get_list(state, "images"),
+        "citations": _safe_get_list(state, "citations"),
+        "knowledge_release_id": state.get("knowledge_release_id"),
+        "answer_status": state.get("answer_status"),
+        "data_as_of": state.get("data_as_of"),
+        "assumptions": _safe_get_list(state, "assumptions"),
+        "limitations": _safe_get_list(state, "limitations"),
 
         # 对话历史
         "messages": _safe_get_list(state, "messages"),

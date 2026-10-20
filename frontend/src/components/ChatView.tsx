@@ -7,7 +7,7 @@ import type { ChatMessage } from '@/types'
 
 interface ChatViewProps {
   hideInput?: boolean
-  onSend?: (content: string) => Promise<void>
+  onSend?: (content: string, imageUrl?: string) => void | Promise<void>
   messages?: ChatMessage[]
   customerMode?: boolean
   historyLoaded?: boolean
@@ -36,13 +36,13 @@ export default function ChatView({ hideInput = false, onSend, messages: external
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, isLoading])
 
-  async function handleSend(content: string) {
-    try { await (onSend ? onSend(content) : sendMessage(content)) } catch { /* hook owns error state */ }
+  async function handleSend(content: string, imageUrl?: string) {
+    try { await (onSend ? onSend(content, imageUrl) : sendMessage(content, imageUrl)) } catch { /* hook owns error state */ }
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
-      <div className="flex-1 overflow-y-auto px-3 py-4 sm:px-5">
+      <div className="flex-1 overflow-y-auto px-3 py-4 sm:px-5" aria-live="polite">
         {!historyLoaded ? <LoadingDots /> : messages.length === 0 ? (
           <div className="mx-auto flex min-h-full max-w-xl flex-col justify-center py-6">
             <div className="text-center">

@@ -1,14 +1,13 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Plus, Search, Clock, Loader2, AlertTriangle } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Search, Clock, Loader2, AlertTriangle } from 'lucide-react'
 import { useChatStore } from '@/stores/chat'
+import { normalizeStatus } from '@/api/sessions'
 import type { Session } from '@/types'
 
 interface Props {
   sessions: Session[]
   activeId: string | null
   onSelect: (id: string) => void
-  onNewSession: () => void
   isLoading?: boolean
 }
 
@@ -35,13 +34,14 @@ export default function ConversationList({
   sessions,
   activeId,
   onSelect,
-  onNewSession,
   isLoading,
 }: Props) {
   const [search, setSearch] = useState('')
-  const navigate = useNavigate()
   const highIntentAlerts = useChatStore((s) => s.highIntentAlerts)
-  const highIntentSessionIds = new Set(highIntentAlerts.map((a) => a.session_id))
+  const highIntentSessionIds = useMemo(
+    () => new Set(highIntentAlerts.map((a) => a.session_id)),
+    [highIntentAlerts],
+  )
 
   const filtered = sessions
     .filter(
@@ -75,15 +75,9 @@ export default function ConversationList({
         </div>
       </div>
 
-      {/* New session button */}
+      {/* 会话列表（会话由客户发消息自动创建，B端不再手动新建空会话） */}
       <div className="px-3 pb-2">
-        <button
-          onClick={onNewSession}
-          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs font-medium text-neutral-600 hover:bg-neutral-50 transition-colors"
-        >
-          <Plus size={13} strokeWidth={1.5} />
-          新建会话
-        </button>
+        <p className="text-[11px] text-neutral-400">客户发消息后自动出现在此列表</p>
       </div>
 
       {/* Hermes AI Assistant card */}
@@ -147,7 +141,7 @@ export default function ConversationList({
         ) : (
           filtered.map((session) => {
             const isActive = session.id === activeId
-            const status = statusConfig[session.status]
+            const status = statusConfig[normalizeStatus(session.status)]
             const isHighIntent = highIntentSessionIds.has(session.id)
 
             return (
